@@ -228,9 +228,9 @@ function resetAppState(){
 
 async function loadUserData(){
   if(!currentUser) return;
-  const userId=currentUser.id;
+  const userId = currentUser.id;
   try {
-    const [s,p,f,mf,w,mg,ef]=await Promise.all([
+    const [s,p,f,mf,w,mg,ef] = await Promise.all([
       sb.from('sessions').select('*').eq('user_id',userId).order('date'),
       sb.from('personal_records').select('*').eq('user_id',userId),
       sb.from('food_log').select('*').eq('user_id',userId).order('ts'),
@@ -239,6 +239,16 @@ async function loadUserData(){
       sb.from('macro_goals').select('*').eq('user_id',userId).maybeSingle(),
       sb.from('exercise_favorites').select('*').eq('user_id',userId)
     ]);
+
+    // Surface any RLS or network errors visibly
+    const errs = [s,p,f,mf,w,mg,ef].map(r=>r.error).filter(Boolean);
+    if(errs.length){
+      const msg = errs[0].message || errs[0].code || 'Unknown error';
+      toast('DB error: '+msg,'var(--red)');
+      console.error('Supabase errors:', errs);
+      return;
+    }
+
     state.sessions      = s.data  || [];
     state.prs           = (p.data || []).reduce((acc,r)=>{ acc[r.exercise]={weight:parseFloat(r.weight),reps:parseInt(r.reps),date:r.date}; return acc; },{});
     state.foodLog       = f.data  || [];
@@ -246,9 +256,10 @@ async function loadUserData(){
     state.weightLog     = w.data  || [];
     state.macroGoals    = mg.data || {calories:2500,protein:180,carbs:250,fat:80};
     state.favorites     = (ef.data|| []).map(r=>r.exercise);
-  } catch(err) {
-    console.error('loadUserData failed:', err);
-    toast('Error loading data — please refresh','var(--red)');
+    console.log('Loaded — sessions:',state.sessions.length,'prs:',Object.keys(state.prs).length);
+  } catch(err){
+    console.error('loadUserData exception:',err);
+    toast('Load error: '+err.message,'var(--red)');
   }
 }
 
@@ -537,6 +548,7 @@ function renderHistory(){
   const resuming=!!state._currentSession;
   return `
     <div class="page-header"><div class="page-title">Workout History</div><div style="display:flex;gap:8px">${sessions.length?`<button class="btn btn-outline btn-sm" id="export-csv">⬇ Export</button>`:''}<button class="btn btn-danger btn-sm" id="logout-btn">Sign Out</button></div></div>
+    <div style="font-size:11px;color:var(--text-muted);background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:6px 10px">v2.0.0 · ${currentUser?.email||'unknown'} · sessions:${state.sessions.length}</div>
     ${sessions.length===0?'<div class="empty">No workouts logged yet.</div>':sessions.map(s=>`<div class="history-session"><div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px"><div class="history-date" style="margin-bottom:0">${fmtDate(s.date)}</div><div style="display:flex;gap:6px"><button class="btn btn-outline btn-xs resume-btn" data-resume="${s.id}" ${resuming?'disabled style="opacity:.4;cursor:not-allowed"':''}>↩ Resume</button><button class="btn btn-danger btn-xs del-session-btn" data-del-session="${s.id}">✕</button></div></div>${s.exercises.map(ex=>`<div class="history-exercise">${ex.muscle} — ${ex.name}</div><div class="history-sets">${ex.sets.map(set=>`${set.type==='warmup'?'WU':'●'} ${set.weight}lbs × ${set.reps}`).join('  ')}</div>`).join('')}</div>`).join('')}`;
 }
 
