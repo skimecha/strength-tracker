@@ -1,9 +1,9 @@
 {
-  "name": "Strength Tracker",
-  "short_name": "Strength",
+  "name": "Lock In: Strength",
+  "short_name": "Lock In",
   "description": "Personal fitness, nutrition and weight tracker",
-  "start_url": "/strength-tracker/",
-  "scope": "/strength-tracker/",
+  "start_url": "/",
+  "scope": "/",
   "display": "standalone",
   "background_color": "#0f1117",
   "theme_color": "#0f1117",
