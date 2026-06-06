@@ -349,7 +349,7 @@ function attachAuthEvents(view){
     el('btn-forgot', async()=>{
       const email=document.getElementById('a-email').value.trim();
       if(!email){ authMsg('Please enter your email'); return; }
-      const {error}=await sb.auth.resetPasswordForEmail(email,{redirectTo:'https://skimecha.github.io/strength-tracker/'});
+      const {error}=await sb.auth.resetPasswordForEmail(email,{redirectTo:'https://lockinstrength.com'});
       if(error) authMsg(error.message);
       else authMsg('Reset link sent — check your email','success');
     });
@@ -368,7 +368,7 @@ function attachAuthEvents(view){
 }
 
 async function handleGoogleAuth(){
-  await sb.auth.signInWithOAuth({provider:'google',options:{redirectTo:'https://skimecha.github.io/strength-tracker/'}});
+  await sb.auth.signInWithOAuth({provider:'google',options:{redirectTo:'https://lockinstrength.com'}});
 }
 
 async function handleLogout(){
