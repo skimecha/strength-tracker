@@ -228,23 +228,28 @@ function resetAppState(){
 
 async function loadUserData(){
   if(!currentUser) return;
-  const uid=currentUser.id;
-  const [s,p,f,mf,w,mg,ef]=await Promise.all([
-    sb.from('sessions').select('*').eq('user_id',uid).order('date'),
-    sb.from('personal_records').select('*').eq('user_id',uid),
-    sb.from('food_log').select('*').eq('user_id',uid).order('ts'),
-    sb.from('meal_favorites').select('*').eq('user_id',uid),
-    sb.from('weight_log').select('*').eq('user_id',uid).order('date'),
-    sb.from('macro_goals').select('*').eq('user_id',uid).single(),
-    sb.from('exercise_favorites').select('*').eq('user_id',uid)
-  ]);
-  state.sessions = s.data||[];
-  state.prs = (p.data||[]).reduce((acc,r)=>{ acc[r.exercise]={weight:parseFloat(r.weight),reps:parseInt(r.reps),date:r.date}; return acc; },{});
-  state.foodLog = f.data||[];
-  state.mealFavorites = mf.data||[];
-  state.weightLog = w.data||[];
-  state.macroGoals = mg.data||{calories:2500,protein:180,carbs:250,fat:80};
-  state.favorites = (ef.data||[]).map(r=>r.exercise);
+  const userId=currentUser.id;
+  try {
+    const [s,p,f,mf,w,mg,ef]=await Promise.all([
+      sb.from('sessions').select('*').eq('user_id',userId).order('date'),
+      sb.from('personal_records').select('*').eq('user_id',userId),
+      sb.from('food_log').select('*').eq('user_id',userId).order('ts'),
+      sb.from('meal_favorites').select('*').eq('user_id',userId),
+      sb.from('weight_log').select('*').eq('user_id',userId).order('date'),
+      sb.from('macro_goals').select('*').eq('user_id',userId).maybeSingle(),
+      sb.from('exercise_favorites').select('*').eq('user_id',userId)
+    ]);
+    state.sessions      = s.data  || [];
+    state.prs           = (p.data || []).reduce((acc,r)=>{ acc[r.exercise]={weight:parseFloat(r.weight),reps:parseInt(r.reps),date:r.date}; return acc; },{});
+    state.foodLog       = f.data  || [];
+    state.mealFavorites = mf.data || [];
+    state.weightLog     = w.data  || [];
+    state.macroGoals    = mg.data || {calories:2500,protein:180,carbs:250,fat:80};
+    state.favorites     = (ef.data|| []).map(r=>r.exercise);
+  } catch(err) {
+    console.error('loadUserData failed:', err);
+    toast('Error loading data — please refresh','var(--red)');
+  }
 }
 
 // ─── AUTH RENDER ──────────────────────────────────────────────────────────────
