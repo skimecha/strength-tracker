@@ -167,7 +167,7 @@ const sb = createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true, storageKey: 'lockin-auth' }
 });
 
-const APP_VERSION = '2.4.0';
+const APP_VERSION = '2.5.0';
 
 // ─── EXERCISES ───────────────────────────────────────────────────────────────
 const EXERCISES = {
@@ -752,9 +752,14 @@ function renderMore(){
         <button class="btn btn-outline btn-full" id="show-tos-btn">Terms of Service</button>
       </div>
     </div>
-    <div class="card" style="opacity:.45">
+    <div class="card">
       <div class="card-title">Support</div>
-      <div style="font-size:13px;color:var(--text-muted)">FAQ · Contact — coming soon</div>
+      <div style="font-size:13px;color:var(--text-muted);margin-bottom:12px">Have a question or found a bug? Let us know.</div>
+      <textarea id="support-msg" placeholder="Describe your question or issue…" style="min-height:100px;resize:vertical;font-size:14px;padding:10px 12px;border-radius:var(--radius-sm);width:100%;background:var(--surface2);border:1px solid var(--border);color:var(--text)"></textarea>
+      <button class="btn btn-primary btn-full" id="support-submit-btn" style="margin-top:10px">Send Message</button>
+      <div style="text-align:center;margin-top:10px;font-size:12px;color:var(--text-muted)">
+        Prefer email? <a href="mailto:lockinstrength@gmail.com" style="color:var(--accent);text-decoration:none">lockinstrength@gmail.com</a>
+      </div>
     </div>
 
     <button class="btn btn-outline btn-sm btn-full" id="logout-btn">Sign Out</button>
@@ -845,6 +850,7 @@ function attachEvents(){
   el('delete-account-btn',  showDeleteAccountModal);
   el('show-privacy-btn', ()=>showPolicyModal('Privacy Policy', PRIVACY_POLICY));
   el('show-tos-btn',     ()=>showPolicyModal('Terms of Service', TERMS_OF_SERVICE));
+  el('support-submit-btn', submitSupportMessage);
 
   el('edit-goals-btn',showGoalsModal);
   el('add-food-btn',showAddFoodModal);
@@ -1126,6 +1132,31 @@ function showPolicyModal(title, content){
     </div>`;
   document.getElementById('modal-cancel').addEventListener('click',closeModal);
   document.getElementById('modal-overlay').addEventListener('click',e=>{ if(e.target===e.currentTarget) closeModal(); });
+}
+
+async function submitSupportMessage(){
+  const textarea = document.getElementById('support-msg');
+  const btn = document.getElementById('support-submit-btn');
+  if(!textarea) return;
+  const message = textarea.value.trim();
+  if(!message){ toast('Please enter a message','var(--red)'); return; }
+  btn.disabled = true;
+  btn.textContent = 'Sending…';
+  const { error } = await sb.from('support_messages').insert({
+    user_id: currentUser?.id || null,
+    email: currentUser?.email || null,
+    message
+  });
+  if(error){
+    toast('Could not send — try email instead','var(--red)');
+    btn.disabled = false;
+    btn.textContent = 'Send Message';
+  } else {
+    textarea.value = '';
+    btn.disabled = false;
+    btn.textContent = 'Send Message';
+    toast('Message sent — we\'ll be in touch ✓');
+  }
 }
 
 function closeModal(){ document.getElementById('modal-root').innerHTML=''; }
