@@ -735,37 +735,14 @@ function renderHistory(){
 }
 
 // ── MORE ──────────────────────────────────────────────────────────────────────
-function getPushEnabled(){ return localStorage.getItem('li_push_enabled')==='true'; }
-
 function renderMore(){
-  const pushEnabled = getPushEnabled();
-  const pushPermission = ('Notification' in window) ? Notification.permission : 'unsupported';
   return `
     <div style="display:flex;align-items:baseline;justify-content:space-between"><div class="page-title">More</div><div style="font-size:10px;color:var(--text-muted);font-weight:600">v${APP_VERSION}</div></div>
 
     <div class="card">
       <div class="card-title">Account</div>
       <div style="font-size:14px;color:var(--text);margin-bottom:14px;word-break:break-all">${currentUser?.email||''}</div>
-      <div class="btn-grid">
-        <button class="btn btn-outline" id="update-password-btn">Update Password</button>
-        <button class="btn btn-danger" id="delete-account-btn">Delete Account</button>
-      </div>
-    </div>
-
-    <div class="card">
-      <div class="card-title">Settings</div>
-      <div style="display:flex;align-items:center;justify-content:space-between;gap:12px">
-        <div>
-          <div style="font-size:14px;font-weight:700;color:var(--text)">Push Notifications</div>
-          <div style="font-size:12px;color:var(--text-muted);margin-top:2px">
-            ${pushPermission==='denied'?'Blocked by browser — enable in Chrome site settings':pushPermission==='unsupported'?'Not supported on this browser':'Notify when rest timer ends'}
-          </div>
-        </div>
-        <div class="toggle-group" style="width:auto;flex-shrink:0">
-          <div class="toggle-opt ${!pushEnabled?'active':''}" data-push="off" style="padding:8px 12px;font-size:13px">Off</div>
-          <div class="toggle-opt ${pushEnabled?'active':''}" data-push="on" style="padding:8px 12px;font-size:13px;${pushPermission==='denied'?'opacity:.4;cursor:not-allowed':''}">On</div>
-        </div>
-      </div>
+      <button class="btn btn-outline btn-full" id="update-password-btn">Update Password</button>
     </div>
 
     <div class="card" style="opacity:.45">
@@ -776,7 +753,12 @@ function renderMore(){
       <div class="card-title">Support</div>
       <div style="font-size:13px;color:var(--text-muted)">FAQ · Contact — coming soon</div>
     </div>
-    <button class="btn btn-outline btn-sm btn-full" id="logout-btn" style="margin-top:4px">Sign Out</button>`;
+
+    <button class="btn btn-outline btn-sm btn-full" id="logout-btn">Sign Out</button>
+
+    <div style="text-align:center;padding-top:8px">
+      <button id="delete-account-btn" style="background:none;border:none;color:var(--text-muted);font-size:12px;cursor:pointer;text-decoration:underline;padding:8px">Delete account</button>
+    </div>`;
 }
 
 // ─── EVENTS ──────────────────────────────────────────────────────────────────
@@ -858,7 +840,6 @@ function attachEvents(){
   el('logout-btn',handleLogout);
   el('update-password-btn', showUpdatePasswordModal);
   el('delete-account-btn',  showDeleteAccountModal);
-  document.querySelectorAll('[data-push]').forEach(b=>b.addEventListener('click',()=>handlePushToggle(b.dataset.push==='on')));
 
   el('edit-goals-btn',showGoalsModal);
   el('add-food-btn',showAddFoodModal);
@@ -1009,6 +990,7 @@ function showDeleteAccountModal(){
         <div class="modal-title" style="color:var(--red)">Delete Account</div>
         <div style="font-size:13px;color:var(--text);line-height:1.6">This will permanently delete all your workouts, nutrition logs, weight entries, and personal records. <strong>This cannot be undone.</strong></div>
         <div style="background:var(--red-dim);border:1px solid var(--red);border-radius:var(--radius-sm);padding:12px;font-size:13px;color:var(--red);font-weight:700">Export your data first if you want a copy.</div>
+        <button class="btn btn-outline btn-full" id="del-export-btn">⬇ Export My Data</button>
         <div class="field"><label>Type DELETE to confirm</label><input type="text" id="del-confirm-input" placeholder="DELETE" autocomplete="off" style="text-align:center;font-size:18px;font-weight:800;letter-spacing:.1em"></div>
         <div class="btn-grid">
           <button class="btn btn-outline" id="modal-cancel">Cancel</button>
@@ -1018,6 +1000,7 @@ function showDeleteAccountModal(){
     </div>`;
   document.getElementById('modal-cancel').addEventListener('click',closeModal);
   document.getElementById('modal-overlay').addEventListener('click',e=>{ if(e.target===e.currentTarget) closeModal(); });
+  document.getElementById('del-export-btn').addEventListener('click', exportAllCSV);
   document.getElementById('del-confirm-btn').addEventListener('click', async()=>{
     if(document.getElementById('del-confirm-input').value.trim()!=='DELETE'){
       toast('Type DELETE (all caps) to confirm','var(--red)'); return;
@@ -1039,19 +1022,6 @@ async function deleteUserAccount(){
     closeModal();
     toast('Deletion failed: '+err.message,'var(--red)');
   }
-}
-
-async function handlePushToggle(enable){
-  if(!enable){ localStorage.setItem('li_push_enabled','false'); render(); return; }
-  if(!('Notification' in window)){ toast('Push not supported on this browser','var(--red)'); return; }
-  if(Notification.permission==='denied'){ toast('Notifications blocked — enable in Chrome site settings','var(--red)'); return; }
-  if(Notification.permission==='default'){
-    const result=await Notification.requestPermission();
-    if(result!=='granted'){ toast('Notification permission denied','var(--red)'); return; }
-  }
-  localStorage.setItem('li_push_enabled','true');
-  toast('Push notifications enabled ✓');
-  render();
 }
 
 function closeModal(){ document.getElementById('modal-root').innerHTML=''; }
