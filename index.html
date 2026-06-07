@@ -167,7 +167,7 @@ const sb = createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true, storageKey: 'lockin-auth' }
 });
 
-const APP_VERSION = '2.2.0';
+const APP_VERSION = '2.3.0';
 
 // ─── EXERCISES ───────────────────────────────────────────────────────────────
 const EXERCISES = {
@@ -735,18 +735,39 @@ function renderHistory(){
 }
 
 // ── MORE ──────────────────────────────────────────────────────────────────────
+function getPushEnabled(){ return localStorage.getItem('li_push_enabled')==='true'; }
+
 function renderMore(){
+  const pushEnabled = getPushEnabled();
+  const pushPermission = ('Notification' in window) ? Notification.permission : 'unsupported';
   return `
     <div style="display:flex;align-items:baseline;justify-content:space-between"><div class="page-title">More</div><div style="font-size:10px;color:var(--text-muted);font-weight:600">v${APP_VERSION}</div></div>
+
     <div class="card">
       <div class="card-title">Account</div>
-      <div style="font-size:14px;color:var(--text);margin-bottom:14px">${currentUser?.email||''}</div>
-      <button class="btn btn-danger btn-full btn-sm" id="logout-btn">Sign Out</button>
+      <div style="font-size:14px;color:var(--text);margin-bottom:14px;word-break:break-all">${currentUser?.email||''}</div>
+      <div class="btn-grid">
+        <button class="btn btn-outline" id="update-password-btn">Update Password</button>
+        <button class="btn btn-danger" id="delete-account-btn">Delete Account</button>
+      </div>
     </div>
-    <div class="card" style="opacity:.45">
-      <div class="card-title">Profile</div>
-      <div style="font-size:13px;color:var(--text-muted)">Update password · manage account — coming soon</div>
+
+    <div class="card">
+      <div class="card-title">Settings</div>
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:12px">
+        <div>
+          <div style="font-size:14px;font-weight:700;color:var(--text)">Push Notifications</div>
+          <div style="font-size:12px;color:var(--text-muted);margin-top:2px">
+            ${pushPermission==='denied'?'Blocked by browser — enable in Chrome site settings':pushPermission==='unsupported'?'Not supported on this browser':'Notify when rest timer ends'}
+          </div>
+        </div>
+        <div class="toggle-group" style="width:auto;flex-shrink:0">
+          <div class="toggle-opt ${!pushEnabled?'active':''}" data-push="off" style="padding:8px 12px;font-size:13px">Off</div>
+          <div class="toggle-opt ${pushEnabled?'active':''}" data-push="on" style="padding:8px 12px;font-size:13px;${pushPermission==='denied'?'opacity:.4;cursor:not-allowed':''}">On</div>
+        </div>
+      </div>
     </div>
+
     <div class="card" style="opacity:.45">
       <div class="card-title">Disclosures</div>
       <div style="font-size:13px;color:var(--text-muted)">Privacy Policy · Terms of Service — coming soon</div>
@@ -754,7 +775,8 @@ function renderMore(){
     <div class="card" style="opacity:.45">
       <div class="card-title">Support</div>
       <div style="font-size:13px;color:var(--text-muted)">FAQ · Contact — coming soon</div>
-    </div>`;
+    </div>
+    <button class="btn btn-outline btn-sm btn-full" id="logout-btn" style="margin-top:4px">Sign Out</button>`;
 }
 
 // ─── EVENTS ──────────────────────────────────────────────────────────────────
@@ -834,6 +856,9 @@ function attachEvents(){
 
   el('export-csv',exportAllCSV);
   el('logout-btn',handleLogout);
+  el('update-password-btn', showUpdatePasswordModal);
+  el('delete-account-btn',  showDeleteAccountModal);
+  document.querySelectorAll('[data-push]').forEach(b=>b.addEventListener('click',()=>handlePushToggle(b.dataset.push==='on')));
 
   el('edit-goals-btn',showGoalsModal);
   el('add-food-btn',showAddFoodModal);
@@ -946,6 +971,87 @@ function showAddFoodModal(){
     const entry={id:uid(),date:todayKey(),ts:Date.now(),name,calories:parseInt(document.getElementById('f-cal').value)||0,protein:parseFloat(document.getElementById('f-pro').value)||0,carbs:parseFloat(document.getElementById('f-carb').value)||0,fat:parseFloat(document.getElementById('f-fat').value)||0};
     state.foodLog.push(entry); closeModal(); render(); dbAddFood(entry);
   });
+}
+
+function showUpdatePasswordModal(){
+  document.getElementById('modal-root').innerHTML=`
+    <div class="modal-overlay" id="modal-overlay">
+      <div class="modal">
+        <div class="modal-title">Update Password</div>
+        <div id="pw-msg" class="auth-msg"></div>
+        <div class="field"><label>New Password</label><input type="password" id="pw-new" placeholder="Min 8 characters" autocomplete="new-password"></div>
+        <div class="field"><label>Confirm Password</label><input type="password" id="pw-confirm" placeholder="Confirm new password" autocomplete="new-password"></div>
+        <div class="btn-grid">
+          <button class="btn btn-outline" id="modal-cancel">Cancel</button>
+          <button class="btn btn-primary" id="pw-save-btn">Update</button>
+        </div>
+      </div>
+    </div>`;
+  document.getElementById('modal-cancel').addEventListener('click',closeModal);
+  document.getElementById('modal-overlay').addEventListener('click',e=>{ if(e.target===e.currentTarget) closeModal(); });
+  document.getElementById('pw-new').focus();
+  document.getElementById('pw-save-btn').addEventListener('click', async()=>{
+    const p1=document.getElementById('pw-new').value;
+    const p2=document.getElementById('pw-confirm').value;
+    const msg=document.getElementById('pw-msg');
+    if(p1.length<8){ msg.textContent='Password must be at least 8 characters'; msg.className='auth-msg error'; return; }
+    if(p1!==p2){ msg.textContent='Passwords do not match'; msg.className='auth-msg error'; return; }
+    const {error}=await sb.auth.updateUser({password:p1});
+    if(error){ msg.textContent=error.message; msg.className='auth-msg error'; }
+    else { closeModal(); toast('Password updated ✓'); }
+  });
+}
+
+function showDeleteAccountModal(){
+  document.getElementById('modal-root').innerHTML=`
+    <div class="modal-overlay" id="modal-overlay">
+      <div class="modal">
+        <div class="modal-title" style="color:var(--red)">Delete Account</div>
+        <div style="font-size:13px;color:var(--text);line-height:1.6">This will permanently delete all your workouts, nutrition logs, weight entries, and personal records. <strong>This cannot be undone.</strong></div>
+        <div style="background:var(--red-dim);border:1px solid var(--red);border-radius:var(--radius-sm);padding:12px;font-size:13px;color:var(--red);font-weight:700">Export your data first if you want a copy.</div>
+        <div class="field"><label>Type DELETE to confirm</label><input type="text" id="del-confirm-input" placeholder="DELETE" autocomplete="off" style="text-align:center;font-size:18px;font-weight:800;letter-spacing:.1em"></div>
+        <div class="btn-grid">
+          <button class="btn btn-outline" id="modal-cancel">Cancel</button>
+          <button class="btn btn-danger" id="del-confirm-btn">Delete Everything</button>
+        </div>
+      </div>
+    </div>`;
+  document.getElementById('modal-cancel').addEventListener('click',closeModal);
+  document.getElementById('modal-overlay').addEventListener('click',e=>{ if(e.target===e.currentTarget) closeModal(); });
+  document.getElementById('del-confirm-btn').addEventListener('click', async()=>{
+    if(document.getElementById('del-confirm-input').value.trim()!=='DELETE'){
+      toast('Type DELETE (all caps) to confirm','var(--red)'); return;
+    }
+    await deleteUserAccount();
+  });
+}
+
+async function deleteUserAccount(){
+  try {
+    // RPC calls the SECURITY DEFINER function which deletes the auth.users row
+    // Cascade deletes handle all child table rows automatically
+    const {error}=await sb.rpc('delete_own_account');
+    if(error) throw error;
+    await sb.auth.signOut();
+    closeModal();
+    toast('Account deleted');
+  } catch(err){
+    closeModal();
+    toast('Deletion failed: '+err.message,'var(--red)');
+  }
+}
+
+async function handlePushToggle(enable){
+  if(!enable){ localStorage.setItem('li_push_enabled','false'); render(); return; }
+  if(!('Notification' in window)){ toast('Push not supported on this browser','var(--red)'); return; }
+  if(Notification.permission==='denied'){ toast('Notifications blocked — enable in Chrome site settings','var(--red)'); return; }
+  if(Notification.permission==='default'){
+    const result=await Notification.requestPermission();
+    if(result!=='granted'){ toast('Notification permission denied','var(--red)'); return; }
+  }
+  localStorage.setItem('li_push_enabled','true');
+  toast('Push notifications enabled ✓');
+  render();
 }
 
 function closeModal(){ document.getElementById('modal-root').innerHTML=''; }
