@@ -170,7 +170,7 @@ const sb = createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true, storageKey: 'lockin-auth' }
 });
 
-const APP_VERSION = '2.7.0';
+const APP_VERSION = '2.7.1';
 
 // ─── EXERCISES ───────────────────────────────────────────────────────────────
 const EXERCISES = {
@@ -448,7 +448,13 @@ function toast(msg,color){
 // ─── RENDER ───────────────────────────────────────────────────────────────────
 function render(){
   document.getElementById('nav-wrap').innerHTML=renderNav();
-  document.getElementById('views-wrap').innerHTML=renderViews();
+  try {
+    document.getElementById('views-wrap').innerHTML=renderViews();
+  } catch(e) {
+    console.error('render error:',e);
+    toast('Display error — please refresh','var(--red)');
+    return;
+  }
   attachEvents();
 }
 
@@ -734,8 +740,8 @@ function renderNutrition(){
     <div class="page-header"><div><div class="page-title">Nutrition</div><div class="subtitle">${fmtDate(Date.now())}</div></div><div style="display:flex;align-items:center;gap:8px"><div style="font-size:10px;color:var(--text-muted);font-weight:600">v${APP_VERSION}</div><button class="btn btn-outline btn-sm" id="edit-goals-btn">Goals</button></div></div>
     <div class="card"><div class="card-title">Today's Totals</div><div style="text-align:center;margin-bottom:14px"><div style="font-size:42px;font-weight:800;color:var(--text)">${totals.calories}</div><div style="font-size:13px;color:var(--text-muted)">of ${g.calories} kcal goal</div></div>${macroBar('Protein','var(--accent)',totals.protein,g.protein,'g')}<div style="margin-top:10px">${macroBar('Carbs','var(--green)',totals.carbs,g.carbs,'g')}</div><div style="margin-top:10px">${macroBar('Fat','var(--amber)',totals.fat,g.fat,'g')}</div></div>
     <div class="toggle-group">
-      <div class="toggle-opt ${view==='log'?'active':''}" data-nutview="log">Log</div>
-      <div class="toggle-opt ${view==='chart'?'active':''}" data-nutview="chart">Chart</div>
+      <div class="toggle-opt ${view==='log'?'active':''}" onclick="state.nutritionView='log';render()">Log</div>
+      <div class="toggle-opt ${view==='chart'?'active':''}" onclick="state.nutritionView='chart';render()">Chart</div>
     </div>
     ${view==='log'?`
       ${state.mealFavorites.length?`<div class="card"><div class="card-title">Favorites — tap to log</div><div class="section-gap">${state.mealFavorites.map(f=>`<div style="display:flex;align-items:center;gap:10px"><div style="flex:1;min-width:0;cursor:pointer" data-log-fav="${f.id}"><div style="font-size:14px;font-weight:700;color:var(--text)">${f.name}</div><div style="font-size:12px;color:var(--text-muted);margin-top:1px">${f.calories} kcal · P:${f.protein}g C:${f.carbs}g F:${f.fat}g</div></div><button class="btn btn-outline btn-xs" data-log-fav="${f.id}" style="flex-shrink:0">+ Log</button><button class="fav-del" data-del-fav="${f.id}" title="Remove favorite">★</button></div>`).join('<hr class="divider" style="margin:2px 0">')}</div></div>`:''}
@@ -744,7 +750,7 @@ function renderNutrition(){
       <div style="font-size:11px;color:var(--text-muted);text-align:center">Export all data from the History tab</div>
     `:`
       <div style="display:flex;gap:6px;overflow-x:auto;padding-bottom:2px">
-        ${PERIODS.map(p=>`<button class="period-btn ${period===p?'active':''}" data-nutperiod="${p}">${p}</button>`).join('')}
+        ${PERIODS.map(p=>`<button class="period-btn ${period===p?'active':''}" onclick="state.nutritionPeriod='${p}';render()">${p}</button>`).join('')}
       </div>
       <div class="card">
         <div class="card-title" style="margin-bottom:4px">Daily Calories</div>
@@ -768,12 +774,12 @@ function renderBodyweight(){
     <div class="card"><div class="card-title">Log Today's Weight</div><div class="field"><label>Weight (${unit})</label><input type="number" id="wt-input" placeholder="e.g. 185" step="0.1" style="font-size:22px;text-align:center;font-weight:800"></div><button class="btn btn-primary" id="log-weight-btn" style="margin-top:10px">Log Weight</button></div>
     ${log.length?`
     <div class="toggle-group">
-      <div class="toggle-opt ${view==='list'?'active':''}" data-wtview="list">List</div>
-      <div class="toggle-opt ${view==='chart'?'active':''}" data-wtview="chart">Chart</div>
+      <div class="toggle-opt ${view==='list'?'active':''}" onclick="state.weightView='list';render()">List</div>
+      <div class="toggle-opt ${view==='chart'?'active':''}" onclick="state.weightView='chart';render()">Chart</div>
     </div>
     ${view==='chart'?`
       <div style="display:flex;gap:6px;overflow-x:auto;padding-bottom:2px">
-        ${PERIODS.map(p=>`<button class="period-btn ${period===p?'active':''}" data-wtperiod="${p}">${p}</button>`).join('')}
+        ${PERIODS.map(p=>`<button class="period-btn ${period===p?'active':''}" onclick="state.weightPeriod='${p}';render()">${p}</button>`).join('')}
       </div>
       <div style="background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:12px">
         ${renderWeightChartSVG(period,unit)}
