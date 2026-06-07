@@ -170,7 +170,7 @@ const sb = createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true, storageKey: 'lockin-auth' }
 });
 
-const APP_VERSION = '2.7.1';
+const APP_VERSION = '2.7.2';
 
 // ─── EXERCISES ───────────────────────────────────────────────────────────────
 const EXERCISES = {
@@ -446,15 +446,22 @@ function toast(msg,color){
 }
 
 // ─── RENDER ───────────────────────────────────────────────────────────────────
+function safeRender(fn, name){
+  try { return fn(); }
+  catch(e){
+    console.error(`render error in ${name}:`, e.message, e.stack);
+    return `<div style="padding:20px;color:var(--red);font-size:13px;font-weight:700">⚠ Error in ${name}: ${e.message}</div>`;
+  }
+}
+
 function render(){
   document.getElementById('nav-wrap').innerHTML=renderNav();
-  try {
-    document.getElementById('views-wrap').innerHTML=renderViews();
-  } catch(e) {
-    console.error('render error:',e);
-    toast('Display error — please refresh','var(--red)');
-    return;
-  }
+  document.getElementById('views-wrap').innerHTML=`
+    <div class="view ${state.view==='log'?'active':''}">${safeRender(renderLog,'Workout')}</div>
+    <div class="view ${state.view==='nutrition'?'active':''}">${safeRender(renderNutrition,'Nutrition')}</div>
+    <div class="view ${state.view==='bodyweight'?'active':''}">${safeRender(renderBodyweight,'Weight')}</div>
+    <div class="view ${state.view==='history'?'active':''}">${safeRender(renderHistory,'History')}</div>
+    <div class="view ${state.view==='more'?'active':''}">${safeRender(renderMore,'More')}</div>`;
   attachEvents();
 }
 
@@ -467,15 +474,6 @@ function renderNav(){
     {id:'more',      icon:iconList(),      label:'More'},
   ];
   return `<nav class="nav">${tabs.map(t=>`<button class="nav-btn ${state.view===t.id?'active':''}" data-nav="${t.id}">${t.icon}<span>${t.label}</span></button>`).join('')}</nav>`;
-}
-
-function renderViews(){
-  return `
-    <div class="view ${state.view==='log'?'active':''}">${renderLog()}</div>
-    <div class="view ${state.view==='nutrition'?'active':''}">${renderNutrition()}</div>
-    <div class="view ${state.view==='bodyweight'?'active':''}">${renderBodyweight()}</div>
-    <div class="view ${state.view==='history'?'active':''}">${renderHistory()}</div>
-    <div class="view ${state.view==='more'?'active':''}">${renderMore()}</div>`;
 }
 
 // ── LOG ───────────────────────────────────────────────────────────────────────
