@@ -170,7 +170,7 @@ const sb = createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true, storageKey: 'lockin-auth' }
 });
 
-const APP_VERSION = '2.7.2';
+const APP_VERSION = '2.7.3';
 
 // ─── EXERCISES ───────────────────────────────────────────────────────────────
 const EXERCISES = {
@@ -430,6 +430,7 @@ async function dbToggleExFav(exercise){
 // ─── UTILS ───────────────────────────────────────────────────────────────────
 const uid=()=>(typeof crypto!=='undefined'&&crypto.randomUUID)?crypto.randomUUID():Math.random().toString(36).slice(2,9);
 function fmtDate(d){ return new Date(d).toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric'}); }
+function fmtDateShort(d){ return new Date(d).toLocaleDateString('en-US',{month:'short',day:'numeric'}); }
 function fmtTime(d){ return new Date(d).toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit'}); }
 function todayKey(){ return new Date().toLocaleDateString('en-US'); }
 function lbsToKg(v){ return (v*0.453592).toFixed(1); }
