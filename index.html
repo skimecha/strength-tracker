@@ -185,10 +185,12 @@ const EXERCISES = {
   'Hips':['Hip Abductors','Hip Adductors']
 };
 
+const CARDIO_ACTIVITIES = ['Running','Walking','Cycling','Rowing','Elliptical','Swimming','Jump Rope','Stair Climber','Hiking','HIIT','Skiing','Other'];
+
 // ─── APP STATE ────────────────────────────────────────────────────────────────
 let currentUser = null;
 let state = {
-  view:'log',logStep:'muscle',
+  view:'log',logStep:'type',
   selectedMuscle:null,selectedExercise:null,
   setType:'working',weight:45,reps:10,weightInc:5,repsInc:1,
   pendingSets:[],_currentSession:null,
@@ -198,7 +200,13 @@ let state = {
   macroGoals:{calories:2500,protein:180,carbs:250,fat:80},
   foodLog:[],mealFavorites:[],
   weightLog:[],
-  weightUnit: localStorage.getItem('li_weight_unit') || 'lbs'
+  weightUnit: localStorage.getItem('li_weight_unit') || 'lbs',
+  cardio:{
+    activity:null,
+    stopwatch:{running:false,elapsed:0,interval:null},
+    distance:'',distUnit:'mi',heartRate:null,
+    hrTestStep:'idle',hrTestCountdown:0,hrTestInterval:null,hrBeats:''
+  }
 };
 
 // ─── AUTH ─────────────────────────────────────────────────────────────────────
@@ -223,7 +231,8 @@ function resetAppState(){
   state.sessions=[]; state.prs={}; state.favorites=[];
   state.foodLog=[]; state.mealFavorites=[]; state.weightLog=[];
   state.macroGoals={calories:2500,protein:180,carbs:250,fat:80};
-  state.logStep='muscle'; state._currentSession=null; state.pendingSets=[]; state.view='log';
+  state.logStep='type'; state._currentSession=null; state.pendingSets=[]; state.view='log';
+  swStop(); state.cardio={activity:null,stopwatch:{running:false,elapsed:0,interval:null},distance:'',distUnit:'mi',heartRate:null,hrTestStep:'idle',hrTestCountdown:0,hrTestInterval:null,hrBeats:''};
 }
 
 async function loadUserData(){
@@ -456,15 +465,38 @@ function renderViews(){
 }
 
 // ── LOG ───────────────────────────────────────────────────────────────────────
-function renderLog(){ if(state.logStep==='muscle') return renderMuscleSelect(); if(state.logStep==='exercise') return renderExerciseSelect(); return renderSets(); }
+function renderLog(){
+  if(state.logStep==='type')            return renderWorkoutType();
+  if(state.logStep==='muscle')          return renderMuscleSelect();
+  if(state.logStep==='exercise')        return renderExerciseSelect();
+  if(state.logStep==='sets')            return renderSets();
+  if(state.logStep==='cardio-activity') return renderCardioActivity();
+  if(state.logStep==='cardio-log')      return renderCardioLog();
+  return renderWorkoutType();
+}
 
-function renderMuscleSelect(){
-  const banner=state._currentSession?.exercises?.length?`<div style="background:var(--accent-dim);border:1px solid var(--accent);border-radius:var(--radius-sm);padding:10px 14px;font-size:13px;color:var(--accent);font-weight:700">↩ Resuming ${fmtDate(state._currentSession.date)} — ${state._currentSession.exercises.length} exercise${state._currentSession.exercises.length!==1?'s':''} logged. Continue or Finish.</div>`:'';
+function renderWorkoutType(){
+  const hasSets = state._currentSession?.exercises?.length;
   return `
     <div><div class="page-title">Log Workout</div><div class="subtitle">${fmtDate(Date.now())}</div></div>
-    ${banner}
-    <div class="card"><div class="card-title">Select Muscle Group</div><div class="muscle-grid">${Object.keys(EXERCISES).map(m=>`<button class="muscle-btn" data-muscle="${m}">${m}</button>`).join('')}</div></div>
-    ${state._currentSession?.exercises?.length?`<button class="btn btn-green btn-full" id="finish-from-muscle">✓ Finish & Save</button>`:''}`;
+    ${hasSets?`<div style="background:var(--accent-dim);border:1px solid var(--accent);border-radius:var(--radius-sm);padding:10px 14px;font-size:13px;color:var(--accent);font-weight:700">↩ Resuming ${fmtDate(state._currentSession.date)} — ${state._currentSession.exercises.length} exercise${state._currentSession.exercises.length!==1?'s':''} logged. Add more or finish.</div>`:''}
+    <div class="card">
+      <div class="card-title">What are you doing today?</div>
+      <div style="display:flex;flex-direction:column;gap:10px">
+        <button class="btn btn-outline" id="choose-strength" style="padding:20px 18px;font-size:16px;justify-content:flex-start;gap:14px">${iconDumbbell()}<div style="text-align:left"><div>Strength Training</div><div style="font-size:12px;color:var(--text-muted);font-weight:400;margin-top:2px">Resistance exercises by muscle group</div></div></button>
+        <button class="btn btn-outline" id="choose-cardio" style="padding:20px 18px;font-size:16px;justify-content:flex-start;gap:14px">${iconCardio()}<div style="text-align:left"><div>Cardio</div><div style="font-size:12px;color:var(--text-muted);font-weight:400;margin-top:2px">Running, cycling, rowing and more</div></div></button>
+      </div>
+    </div>
+    ${hasSets?`<button class="btn btn-green btn-full" id="finish-from-type">✓ Finish & Save</button>`:''}`;
+}
+
+function renderMuscleSelect(){
+  return `
+    <div style="display:flex;align-items:center;gap:10px">
+      <button class="btn btn-outline btn-sm" id="back-type">← Back</button>
+      <div><div class="page-title" style="font-size:20px">Strength Training</div><div class="subtitle">${fmtDate(Date.now())}</div></div>
+    </div>
+    <div class="card"><div class="card-title">Select Muscle Group</div><div class="muscle-grid">${Object.keys(EXERCISES).map(m=>`<button class="muscle-btn" data-muscle="${m}">${m}</button>`).join('')}</div></div>`;
 }
 
 function renderExerciseSelect(){
@@ -507,13 +539,148 @@ function workingIdx(i){ let n=0; for(let j=0;j<=i;j++){ if(state.pendingSets[j].
 
 function renderExerciseHistory(exercise){
   const past=[];
-  state.sessions.forEach(s=>{ s.exercises.forEach(ex=>{ if(ex.name===exercise){ const working=ex.sets.filter(s=>s.type==='working'); if(working.length) past.push({date:s.date,sets:working}); } }); });
+  state.sessions.forEach(s=>{ s.exercises.forEach(ex=>{ if(ex.type==='cardio') return; if(ex.name===exercise){ const working=ex.sets.filter(s=>s.type==='working'); if(working.length) past.push({date:s.date,sets:working}); } }); });
   if(!past.length) return '';
   past.sort((a,b)=>b.date-a.date);
   const shown=past.slice(0,8);
   const overallBest=past.reduce((best,session)=>{ const s=session.sets.reduce((a,b)=>b.weight>a.weight||(b.weight===a.weight&&b.reps>a.reps)?b:a,session.sets[0]); return s.weight>best.weight||(s.weight===best.weight&&s.reps>best.reps)?s:best; },past[0].sets[0]);
   return `<div style="margin-top:8px;border-top:2px dashed var(--border);padding-top:16px"><div class="card-title" style="margin-bottom:12px">Past Sessions — ${exercise}</div><div class="section-gap">${shown.map((session,idx)=>{ const best=session.sets.reduce((b,s)=>s.weight>b.weight||(s.weight===b.weight&&s.reps>b.reps)?s:b,session.sets[0]); const isPR=best.weight===overallBest.weight&&best.reps===overallBest.reps; return `<div style="background:var(--surface);border:1px solid ${idx===0?'var(--accent)':'var(--border)'};border-radius:var(--radius-sm);padding:10px 14px"><div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px"><div style="font-size:12px;font-weight:700;color:${idx===0?'var(--accent)':'var(--text-muted)'}">${idx===0?'Most Recent — ':''}${fmtDate(session.date)}</div>${isPR?`<div style="font-size:10px;font-weight:800;background:var(--amber-dim);color:var(--amber);border:1px solid var(--amber);border-radius:20px;padding:2px 7px">🏆 PR</div>`:''}</div><div style="font-size:13px;color:var(--text-muted);line-height:1.8">${session.sets.map(s=>`<span style="color:var(--text);font-weight:700">${s.weight}lbs</span> × ${s.reps}`).join(' &nbsp;·&nbsp; ')}</div><div style="font-size:11px;color:var(--text-muted);margin-top:4px">Best: ${best.weight}lbs × ${best.reps} &nbsp;·&nbsp; ${session.sets.length} set${session.sets.length!==1?'s':''}</div></div>`; }).join('')}</div></div>`;
 }
+
+// ── CARDIO SCREENS ────────────────────────────────────────────────────────────
+function renderCardioActivity(){
+  return `
+    <div style="display:flex;align-items:center;gap:10px">
+      <button class="btn btn-outline btn-sm" id="back-type">← Back</button>
+      <div><div class="page-title" style="font-size:20px">Cardio</div><div class="subtitle">Select an activity</div></div>
+    </div>
+    <div class="muscle-grid">
+      ${CARDIO_ACTIVITIES.map(a=>`<button class="muscle-btn" data-activity="${a}">${a}</button>`).join('')}
+    </div>`;
+}
+
+function renderCardioLog(){
+  const c=state.cardio;
+  const e=c.stopwatch.elapsed;
+  const mins=Math.floor(e/60); const secs=e%60;
+  const timeStr=`${String(mins).padStart(2,'0')}:${String(secs).padStart(2,'0')}`;
+  return `
+    <div style="display:flex;align-items:center;gap:10px">
+      <button class="btn btn-outline btn-sm" id="back-cardio-activity">← Back</button>
+      <div><div class="page-title" style="font-size:17px">${c.activity}</div><div class="subtitle">Cardio</div></div>
+    </div>
+    <div class="card">
+      <div class="card-title">Duration</div>
+      <div id="sw-display" style="text-align:center;font-size:56px;font-weight:900;letter-spacing:-.02em;color:${c.stopwatch.running?'var(--accent)':'var(--text)'};font-variant-numeric:tabular-nums;padding:8px 0">${timeStr}</div>
+      <div class="btn-grid">
+        <button class="btn ${c.stopwatch.running?'btn-danger':'btn-green'}" id="sw-toggle">${c.stopwatch.running?'⏸ Pause':'▶ Start'}</button>
+        <button class="btn btn-outline" id="sw-reset">↺ Reset</button>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-title">Distance (optional)</div>
+      <div style="display:flex;gap:8px;align-items:center">
+        <input type="number" id="cardio-distance" value="${c.distance}" placeholder="0.0" step="0.1" style="flex:1;font-size:22px;text-align:center;font-weight:800">
+        <div class="toggle-group" style="width:auto;flex-shrink:0">
+          <div class="toggle-opt ${c.distUnit==='mi'?'active':''}" data-distunit="mi" style="padding:8px 12px;font-size:13px">mi</div>
+          <div class="toggle-opt ${c.distUnit==='km'?'active':''}" data-distunit="km" style="padding:8px 12px;font-size:13px">km</div>
+        </div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-title">Heart Rate (optional)</div>
+      ${renderHRSection()}
+    </div>
+    <button class="btn btn-green btn-full" id="log-cardio">✓ Log Activity</button>
+    <hr class="divider">
+    <button class="btn btn-green" id="finish-workout">✓ Finish & Save</button>
+    <button class="btn btn-danger btn-sm btn-full" id="cancel-workout">Cancel Workout</button>`;
+}
+
+function renderHRSection(){
+  const c=state.cardio;
+  if(c.heartRate) return `
+    <div style="text-align:center;padding:8px 0">
+      <div style="font-size:36px;font-weight:800;color:var(--red)">♥ ${c.heartRate} <span style="font-size:16px;color:var(--text-muted)">bpm</span></div>
+      <button class="btn btn-outline btn-sm" id="hr-clear" style="margin-top:10px">Clear</button>
+    </div>`;
+  if(c.hrTestStep==='idle') return `
+    <div class="field"><label>Enter manually</label>
+      <input type="number" id="hr-manual" placeholder="e.g. 145" style="font-size:22px;text-align:center;font-weight:800">
+      <button class="btn btn-outline" id="hr-manual-save" style="margin-top:8px">Set HR</button>
+    </div>
+    <div style="text-align:center;margin:12px 0;color:var(--text-muted);font-size:13px">— or —</div>
+    <button class="btn btn-outline btn-full" id="hr-test-start">🫀 Guided Heart Rate Test</button>`;
+  if(c.hrTestStep==='instruct') return `
+    <div style="text-align:center;padding:8px 0">
+      <div style="font-size:14px;color:var(--text);line-height:1.7;margin-bottom:14px">Find your pulse on your wrist or neck.<br>Press Start — a 3-second countdown begins, then count your heartbeats for 10 seconds.</div>
+      <button class="btn btn-primary btn-full" id="hr-countdown-start">Start</button>
+      <button class="btn btn-outline btn-sm btn-full" id="hr-test-cancel" style="margin-top:8px">Cancel</button>
+    </div>`;
+  if(c.hrTestStep==='countdown') return `
+    <div style="text-align:center;padding:8px 0">
+      <div style="font-size:13px;color:var(--text-muted);margin-bottom:8px">Get ready — find your pulse…</div>
+      <div class="hr-countdown-display" style="font-size:80px;font-weight:900;color:var(--accent);font-variant-numeric:tabular-nums;line-height:1">${c.hrTestCountdown}</div>
+    </div>`;
+  if(c.hrTestStep==='counting') return `
+    <div style="text-align:center;padding:8px 0">
+      <div style="font-size:13px;font-weight:800;color:var(--green);margin-bottom:8px;letter-spacing:.05em">COUNT YOUR BEATS!</div>
+      <div class="hr-countdown-display" style="font-size:80px;font-weight:900;color:var(--green);font-variant-numeric:tabular-nums;line-height:1">${c.hrTestCountdown}</div>
+      <div style="font-size:13px;color:var(--text-muted);margin-top:8px">seconds remaining</div>
+    </div>`;
+  if(c.hrTestStep==='input') return `
+    <div style="text-align:center;padding:8px 0">
+      <div style="font-size:14px;font-weight:700;color:var(--text);margin-bottom:12px">How many beats did you count?</div>
+      <input type="number" id="hr-beats-input" value="${c.hrBeats}" placeholder="e.g. 24" style="font-size:28px;text-align:center;font-weight:800;margin-bottom:10px">
+      <button class="btn btn-primary btn-full" id="hr-beats-calc">Calculate BPM</button>
+      <button class="btn btn-outline btn-sm btn-full" id="hr-test-cancel" style="margin-top:8px">Cancel</button>
+    </div>`;
+  return '';
+}
+
+// ── CARDIO STOPWATCH ──────────────────────────────────────────────────────────
+function swStart(){ if(state.cardio.stopwatch.running) return; state.cardio.stopwatch.running=true; state.cardio.stopwatch.interval=setInterval(()=>{ state.cardio.stopwatch.elapsed++; updateSwDOM(); },1000); updateSwDOM(); }
+function swStop(){ if(state.cardio?.stopwatch?.interval){ clearInterval(state.cardio.stopwatch.interval); state.cardio.stopwatch.interval=null; } if(state.cardio?.stopwatch) state.cardio.stopwatch.running=false; updateSwDOM(); }
+function swReset(){ swStop(); state.cardio.stopwatch.elapsed=0; updateSwDOM(); }
+function updateSwDOM(){
+  const disp=document.getElementById('sw-display'); if(!disp) return;
+  const e=state.cardio.stopwatch.elapsed; const m=Math.floor(e/60); const s=e%60;
+  disp.textContent=`${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
+  disp.style.color=state.cardio.stopwatch.running?'var(--accent)':'var(--text)';
+  const btn=document.getElementById('sw-toggle');
+  if(btn){ btn.textContent=state.cardio.stopwatch.running?'⏸ Pause':'▶ Start'; btn.className=`btn ${state.cardio.stopwatch.running?'btn-danger':'btn-green'}`; }
+}
+
+// ── HR GUIDED TEST ────────────────────────────────────────────────────────────
+function hrStartCountdown(){
+  state.cardio.hrTestCountdown=3; state.cardio.hrTestStep='countdown'; render();
+  state.cardio.hrTestInterval=setInterval(()=>{
+    state.cardio.hrTestCountdown--;
+    if(state.cardio.hrTestCountdown<=0){
+      clearInterval(state.cardio.hrTestInterval); state.cardio.hrTestInterval=null;
+      state.cardio.hrTestCountdown=10; state.cardio.hrTestStep='counting'; render();
+      state.cardio.hrTestInterval=setInterval(()=>{
+        state.cardio.hrTestCountdown--;
+        if(state.cardio.hrTestCountdown<=0){ clearInterval(state.cardio.hrTestInterval); state.cardio.hrTestInterval=null; state.cardio.hrTestStep='input'; render(); }
+        else { const el=document.querySelector('.hr-countdown-display'); if(el) el.textContent=state.cardio.hrTestCountdown; }
+      },1000);
+    } else { const el=document.querySelector('.hr-countdown-display'); if(el) el.textContent=state.cardio.hrTestCountdown; }
+  },1000);
+}
+function hrCancelTest(){ if(state.cardio.hrTestInterval){ clearInterval(state.cardio.hrTestInterval); state.cardio.hrTestInterval=null; } state.cardio.hrTestStep='idle'; state.cardio.hrTestCountdown=0; render(); }
+
+function logCardioActivity(){
+  const distInput=document.getElementById('cardio-distance');
+  const dist=distInput?parseFloat(distInput.value)||null:null;
+  const entry={type:'cardio',name:state.cardio.activity,duration:state.cardio.stopwatch.elapsed,distance:dist,distUnit:state.cardio.distUnit,heartRate:state.cardio.heartRate};
+  if(!state._currentSession) state._currentSession={id:uid(),date:Date.now(),exercises:[]};
+  state._currentSession.exercises.push(entry);
+  swStop();
+  state.cardio={activity:null,stopwatch:{running:false,elapsed:0,interval:null},distance:'',distUnit:'mi',heartRate:null,hrTestStep:'idle',hrTestCountdown:0,hrTestInterval:null,hrBeats:''};
+  state.logStep='type'; toast(`${entry.name} logged! 🏃`); render();
+}
+
+function fmtDuration(secs){ const m=Math.floor(secs/60); const s=secs%60; return s>0?`${m}m ${s}s`:`${m}m`; }
 
 // ── NUTRITION ─────────────────────────────────────────────────────────────────
 function renderNutrition(){
@@ -561,7 +728,13 @@ function renderHistory(){
             <button class="btn btn-danger btn-xs del-session-btn" data-del-session="${s.id}">✕</button>
           </div>
         </div>
-        ${s.exercises.map(ex=>`<div class="history-exercise">${ex.muscle} — ${ex.name}</div><div class="history-sets">${ex.sets.map(set=>`${set.type==='warmup'?'WU':'●'} ${set.weight}lbs × ${set.reps}`).join('  ')}</div>`).join('')}
+      ${s.exercises.map(ex=>{
+        if(ex.type==='cardio'){
+          const parts=[ex.duration?fmtDuration(ex.duration):null,ex.distance?`${ex.distance} ${ex.distUnit}`:'',ex.heartRate?`♥ ${ex.heartRate} bpm`:''].filter(Boolean);
+          return `<div class="history-exercise">Cardio — ${ex.name}</div><div class="history-sets">${parts.join(' · ')||'No details'}</div>`;
+        }
+        return `<div class="history-exercise">${ex.muscle} — ${ex.name}</div><div class="history-sets">${ex.sets.map(set=>`${set.type==='warmup'?'WU':'●'} ${set.weight}lbs × ${set.reps}`).join('  ')}</div>`;
+      }).join('')}
       </div>`).join('')}
     <div style="border-top:2px solid var(--border);padding-top:16px;margin-top:4px">
       <div class="page-title" style="font-size:18px;margin-bottom:14px">Personal Records</div>
@@ -620,18 +793,59 @@ function attachEvents(){
   document.querySelectorAll('[data-del]').forEach(b=>b.addEventListener('click',()=>{ state.pendingSets.splice(parseInt(b.dataset.del),1); render(); }));
 
   el('next-exercise',()=>{ commitExercise(); state.logStep='exercise'; render(); });
-  el('new-muscle',()=>{ commitExercise(); state.logStep='muscle'; render(); });
+  el('new-muscle',()=>{ commitExercise(); state.logStep='type'; render(); });
 
   el('finish-workout',()=>{
     commitExercise();
     if(state._currentSession?.exercises?.length){ const sess=state._currentSession; state.sessions.push(sess); dbSaveSession(sess); toast('Workout saved! 💪'); }
-    state._currentSession=null; state.pendingSets=[]; state.logStep='muscle'; state.view='history'; render();
+    state._currentSession=null; state.pendingSets=[]; state.logStep='type'; state.view='history'; render();
   });
   el('finish-from-muscle',()=>{
     if(state._currentSession?.exercises?.length){ const sess=state._currentSession; state.sessions.push(sess); dbSaveSession(sess); toast('Workout saved! 💪'); }
-    state._currentSession=null; state.pendingSets=[]; state.logStep='muscle'; state.view='history'; render();
+    state._currentSession=null; state.pendingSets=[]; state.logStep='type'; state.view='history'; render();
   });
-  el('cancel-workout',()=>{ if(confirm('Cancel workout? Unsaved sets will be lost.')){ state._currentSession=null; state.pendingSets=[]; state.logStep='muscle'; render(); } });
+  el('finish-from-type',()=>{
+    if(state._currentSession?.exercises?.length){ const sess=state._currentSession; state.sessions.push(sess); dbSaveSession(sess); toast('Workout saved! 💪'); }
+    state._currentSession=null; state.pendingSets=[]; state.logStep='type'; state.view='history'; render();
+  });
+  el('cancel-workout',()=>{ if(confirm('Cancel workout? Unsaved sets will be lost.')){ swStop(); state._currentSession=null; state.pendingSets=[]; state.logStep='type'; render(); } });
+
+  // Workout type choice
+  el('choose-strength',()=>{ state.logStep='muscle'; render(); });
+  el('choose-cardio',()=>{ state.logStep='cardio-activity'; render(); });
+  el('back-type',()=>{ state.logStep='type'; render(); });
+
+  // Cardio activity selection
+  document.querySelectorAll('[data-activity]').forEach(b=>b.addEventListener('click',()=>{
+    state.cardio.activity=b.dataset.activity; state.logStep='cardio-log'; render();
+  }));
+  el('back-cardio-activity',()=>{ state.logStep='cardio-activity'; render(); });
+
+  // Stopwatch
+  el('sw-toggle',()=>{ state.cardio.stopwatch.running?swStop():swStart(); });
+  el('sw-reset',()=>{ swReset(); render(); });
+
+  // Distance unit
+  document.querySelectorAll('[data-distunit]').forEach(b=>b.addEventListener('click',()=>{ state.cardio.distUnit=b.dataset.distunit; render(); }));
+
+  // HR manual
+  el('hr-manual-save',()=>{
+    const v=parseInt(document.getElementById('hr-manual')?.value);
+    if(v>0){ state.cardio.heartRate=v; render(); }
+  });
+  el('hr-clear',()=>{ state.cardio.heartRate=null; render(); });
+
+  // HR guided test
+  el('hr-test-start',()=>{ state.cardio.hrTestStep='instruct'; render(); });
+  el('hr-countdown-start',()=>{ hrStartCountdown(); });
+  el('hr-test-cancel',()=>{ hrCancelTest(); });
+  el('hr-beats-calc',()=>{
+    const beats=parseInt(document.getElementById('hr-beats-input')?.value);
+    if(beats>0){ state.cardio.heartRate=beats*6; state.cardio.hrTestStep='idle'; state.cardio.hrBeats=''; render(); }
+  });
+
+  // Log cardio activity
+  el('log-cardio',()=>{ logCardioActivity(); });
 
   document.querySelectorAll('.resume-btn').forEach(b=>b.addEventListener('click',()=>{ if(!b.disabled) resumeSession(b.dataset.resume); }));
   document.querySelectorAll('.del-session-btn').forEach(b=>b.addEventListener('click',()=>{ if(confirm('Delete this workout session?')){ state.sessions=state.sessions.filter(s=>s.id!==b.dataset.delSession); dbDeleteSession(b.dataset.delSession); render(); } }));
@@ -689,8 +903,13 @@ function resumeSession(sessionId){
   state.sessions=state.sessions.filter(x=>x.id!==s.id);
   dbDeleteSession(s.id);
   const last=s.exercises[s.exercises.length-1];
-  state.selectedMuscle=last.muscle; state.selectedExercise=null; state.pendingSets=[];
-  state.logStep='exercise'; state.view='log';
+  if(last?.type==='cardio'){
+    state.logStep='type';
+  } else {
+    state.selectedMuscle=last?.muscle||null; state.selectedExercise=null; state.pendingSets=[];
+    state.logStep='exercise';
+  }
+  state.view='log';
   toast('Workout resumed — add more or finish'); render();
 }
 
@@ -778,6 +997,7 @@ function chime(){ try{ const ctx=new(window.AudioContext||window.webkitAudioCont
 
 // ─── ICONS ────────────────────────────────────────────────────────────────────
 function iconDumbbell(){ return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 5v14M18 5v14"/><path d="M3 8h3M18 8h3M3 16h3M18 16h3"/><line x1="6" y1="12" x2="18" y2="12"/></svg>`; }
+function iconCardio(){ return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>`; }
 function iconNutrition(){ return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2a9 9 0 0 1 9 9c0 4-2.5 7.5-6 9l-3 1-3-1C5.5 18.5 3 15 3 11A9 9 0 0 1 12 2z"/><path d="M12 7v5l3 3"/></svg>`; }
 function iconScale(){ return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v4M4.93 6.93l2.83 2.83M2 12h4M4.93 17.07l2.83-2.83M12 22v-4M19.07 17.07l-2.83-2.83M22 12h-4M19.07 6.93l-2.83 2.83"/><circle cx="12" cy="12" r="3"/></svg>`; }
 function iconHourglass(){ return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 22h14M5 2h14M17 22v-4.172a2 2 0 0 0-.586-1.414L12 12l-4.414 4.414A2 2 0 0 0 7 17.828V22M17 2v4.172a2 2 0 0 1-.586 1.414L12 12 7.586 7.586A2 2 0 0 1 7 6.172V2"/></svg>`; }
