@@ -119,6 +119,7 @@ select:focus,input:focus{outline:none;border-color:var(--accent)}
 .filter-row input{flex:1}
 .section-gap{display:flex;flex-direction:column;gap:10px}
 .fav-del{background:none;border:none;color:var(--amber);font-size:20px;cursor:pointer;padding:2px 6px;flex-shrink:0;line-height:1}
+.pr-card:active{border-color:var(--accent)}
 .timer-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:14px 16px}
 .timer-card.running{border-color:var(--accent)}
 .timer-card.done{border-color:var(--green)}
@@ -167,7 +168,7 @@ const sb = createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true, storageKey: 'lockin-auth' }
 });
 
-const APP_VERSION = '2.5.0';
+const APP_VERSION = '2.6.0';
 
 // ─── EXERCISES ───────────────────────────────────────────────────────────────
 const EXERCISES = {
@@ -197,6 +198,7 @@ let state = {
   setType:'working',weight:45,reps:10,weightInc:5,repsInc:1,
   pendingSets:[],_currentSession:null,
   sessions:[],prs:{},favorites:[],
+  historyTab:'sessions',
   timer:{remaining:0,total:0,interval:null,running:false},
   favFilter:false,searchQ:'',
   macroGoals:{calories:2500,protein:180,carbs:250,fat:80},
@@ -449,9 +451,9 @@ function render(){
 function renderNav(){
   const tabs=[
     {id:'log',       icon:iconDumbbell(),  label:'Workout'},
+    {id:'history',   icon:iconHourglass(), label:'History'},
     {id:'nutrition', icon:iconNutrition(), label:'Nutrition'},
     {id:'bodyweight',icon:iconScale(),     label:'Weight'},
-    {id:'history',   icon:iconHourglass(), label:'History'},
     {id:'more',      icon:iconList(),      label:'More'},
   ];
   return `<nav class="nav">${tabs.map(t=>`<button class="nav-btn ${state.view===t.id?'active':''}" data-nav="${t.id}">${t.icon}<span>${t.label}</span></button>`).join('')}</nav>`;
@@ -703,35 +705,55 @@ function renderHistory(){
   const sessions=[...state.sessions].reverse();
   const resuming=!!state._currentSession;
   const prs=Object.entries(state.prs).sort((a,b)=>a[0].localeCompare(b[0]));
+
   return `
     <div class="page-header">
       <div class="page-title">History</div>
       <div style="display:flex;align-items:center;gap:8px">
         <div style="font-size:10px;color:var(--text-muted);font-weight:600">v${APP_VERSION}</div>
-        ${sessions.length?`<button class="btn btn-outline btn-sm" id="export-csv">⬇ Export</button>`:''}
+        ${state.historyTab==='sessions'&&sessions.length?`<button class="btn btn-outline btn-sm" id="export-csv">⬇ Export</button>`:''}
       </div>
     </div>
-    ${sessions.length===0?'<div class="empty">No workouts logged yet.</div>':sessions.map(s=>`
-      <div class="history-session">
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
-          <div class="history-date" style="margin-bottom:0">${fmtDate(s.date)}</div>
-          <div style="display:flex;gap:6px">
-            <button class="btn btn-outline btn-xs resume-btn" data-resume="${s.id}" ${resuming?'disabled style="opacity:.4;cursor:not-allowed"':''}>↩ Resume</button>
-            <button class="btn btn-danger btn-xs del-session-btn" data-del-session="${s.id}">✕</button>
+
+    <div class="toggle-group">
+      <div class="toggle-opt ${state.historyTab==='sessions'?'active':''}" data-histtab="sessions">Workouts</div>
+      <div class="toggle-opt ${state.historyTab==='records'?'active':''}" data-histtab="records">Records</div>
+    </div>
+
+    ${state.historyTab==='sessions'?`
+      ${sessions.length===0?'<div class="empty">No workouts logged yet.</div>':sessions.map(s=>`
+        <div class="history-session">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+            <div class="history-date" style="margin-bottom:0">${fmtDate(s.date)}</div>
+            <div style="display:flex;gap:6px">
+              <button class="btn btn-outline btn-xs resume-btn" data-resume="${s.id}" ${resuming?'disabled style="opacity:.4;cursor:not-allowed"':''}>↩ Resume</button>
+              <button class="btn btn-danger btn-xs del-session-btn" data-del-session="${s.id}">✕</button>
+            </div>
           </div>
-        </div>
-      ${s.exercises.map(ex=>{
-        if(ex.type==='cardio'){
-          const parts=[ex.duration?fmtDuration(ex.duration):null,ex.distance?`${ex.distance} ${ex.distUnit}`:'',ex.heartRate?`♥ ${ex.heartRate} bpm`:''].filter(Boolean);
-          return `<div class="history-exercise">Cardio — ${ex.name}</div><div class="history-sets">${parts.join(' · ')||'No details'}</div>`;
-        }
-        return `<div class="history-exercise">${ex.muscle} — ${ex.name}</div><div class="history-sets">${ex.sets.map(set=>`${set.type==='warmup'?'WU':'●'} ${set.weight}lbs × ${set.reps}`).join('  ')}</div>`;
-      }).join('')}
-      </div>`).join('')}
-    <div style="border-top:2px solid var(--border);padding-top:16px;margin-top:4px">
-      <div class="page-title" style="font-size:18px;margin-bottom:14px">Personal Records</div>
-      ${prs.length===0?'<div class="empty">No records yet.</div>':`<div class="section-gap">${prs.map(([ex,pr])=>`<div class="card" style="padding:12px 14px"><div style="font-size:12px;color:var(--text-muted);margin-bottom:4px">${ex}</div><div style="font-size:22px;font-weight:800;color:var(--text)">${pr.weight} lbs × ${pr.reps}</div><div style="font-size:11px;color:var(--text-muted);margin-top:3px">${fmtDate(pr.date)}</div></div>`).join('')}</div>`}
-    </div>`;
+          ${s.exercises.map(ex=>{
+            if(ex.type==='cardio'){
+              const parts=[ex.duration?fmtDuration(ex.duration):null,ex.distance?`${ex.distance} ${ex.distUnit}`:'',ex.heartRate?`♥ ${ex.heartRate} bpm`:''].filter(Boolean);
+              return `<div class="history-exercise">Cardio — ${ex.name}</div><div class="history-sets">${parts.join(' · ')||'No details'}</div>`;
+            }
+            return `<div class="history-exercise">${ex.muscle} — ${ex.name}</div><div class="history-sets">${ex.sets.map(set=>`${set.type==='warmup'?'WU':'●'} ${set.weight}lbs × ${set.reps}`).join('  ')}</div>`;
+          }).join('')}
+        </div>`).join('')}
+    `:`
+      ${prs.length===0?'<div class="empty">No records yet.</div>':`
+        <div class="section-gap">
+          ${prs.map(([ex,pr])=>`
+            <div class="card pr-card" data-pr="${ex}" style="padding:12px 14px;cursor:pointer">
+              <div style="display:flex;align-items:center;justify-content:space-between">
+                <div>
+                  <div style="font-size:12px;color:var(--text-muted);margin-bottom:4px">${ex}</div>
+                  <div style="font-size:22px;font-weight:800;color:var(--text)">${pr.weight} lbs × ${pr.reps}</div>
+                  <div style="font-size:11px;color:var(--text-muted);margin-top:3px">${fmtDate(pr.date)}</div>
+                </div>
+                <div style="color:var(--text-muted);font-size:20px;font-weight:300">›</div>
+              </div>
+            </div>`).join('')}
+        </div>`}
+    `}`;
 }
 
 // ── MORE ──────────────────────────────────────────────────────────────────────
@@ -843,6 +865,9 @@ function attachEvents(){
 
   document.querySelectorAll('.resume-btn').forEach(b=>b.addEventListener('click',()=>{ if(!b.disabled) resumeSession(b.dataset.resume); }));
   document.querySelectorAll('.del-session-btn').forEach(b=>b.addEventListener('click',()=>{ if(confirm('Delete this workout session?')){ state.sessions=state.sessions.filter(s=>s.id!==b.dataset.delSession); dbDeleteSession(b.dataset.delSession); render(); } }));
+
+  document.querySelectorAll('[data-histtab]').forEach(b=>b.addEventListener('click',()=>{ state.historyTab=b.dataset.histtab; render(); }));
+  document.querySelectorAll('.pr-card').forEach(b=>b.addEventListener('click',()=>showPRModal(b.dataset.pr)));
 
   el('export-csv',exportAllCSV);
   el('logout-btn',handleLogout);
@@ -1157,6 +1182,81 @@ async function submitSupportMessage(){
     btn.textContent = 'Send Message';
     toast('Message sent — we\'ll be in touch ✓');
   }
+}
+
+function renderProgressChart(points){
+  if(points.length<2) return `<div style="text-align:center;color:var(--text-muted);padding:16px;font-size:13px">Log more sessions to see your progression chart</div>`;
+  const W=360,H=160;
+  const PAD={top:12,right:16,bottom:28,left:44};
+  const cW=W-PAD.left-PAD.right, cH=H-PAD.top-PAD.bottom;
+  const weights=points.map(p=>p.weight);
+  const minW=Math.min(...weights), maxW=Math.max(...weights);
+  const wRange=maxW-minW||10;
+  const dates=points.map(p=>p.date);
+  const minD=Math.min(...dates), maxD=Math.max(...dates);
+  const dRange=maxD-minD||1;
+  const toX=d=>PAD.left+((d-minD)/dRange)*cW;
+  const toY=w=>PAD.top+cH-((w-minW)/wRange)*cH;
+  const pts=points.map(p=>({x:toX(p.date),y:toY(p.weight),w:p.weight,d:p.date}));
+  const pathD=pts.map((p,i)=>`${i===0?'M':'L'}${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ');
+  const yLabels=[minW,minW+wRange/2,maxW].map(w=>({y:toY(w),label:Math.round(w)}));
+  return `<svg viewBox="0 0 ${W} ${H}" style="width:100%;display:block">
+    ${yLabels.map(l=>`<line x1="${PAD.left}" y1="${l.y.toFixed(1)}" x2="${W-PAD.right}" y2="${l.y.toFixed(1)}" stroke="var(--border)" stroke-width="1"/>`).join('')}
+    ${yLabels.map(l=>`<text x="${PAD.left-6}" y="${(l.y+4).toFixed(1)}" text-anchor="end" fill="var(--text-muted)" font-size="10" font-family="system-ui">${l.label}</text>`).join('')}
+    <text x="${toX(minD).toFixed(1)}" y="${H-4}" text-anchor="start" fill="var(--text-muted)" font-size="10" font-family="system-ui">${fmtDateShort(minD)}</text>
+    <text x="${toX(maxD).toFixed(1)}" y="${H-4}" text-anchor="end" fill="var(--text-muted)" font-size="10" font-family="system-ui">${fmtDateShort(maxD)}</text>
+    <path d="${pathD}" fill="none" stroke="var(--accent)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+    ${pts.map(p=>`<circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="4" fill="var(--accent)" stroke="var(--bg)" stroke-width="2"/>`).join('')}
+  </svg>`;
+}
+
+function showPRModal(exercise){
+  const pr=state.prs[exercise];
+  if(!pr) return;
+  const history=[];
+  state.sessions.forEach(s=>{
+    s.exercises.forEach(ex=>{
+      if(ex.name===exercise&&ex.type!=='cardio'){
+        const working=(ex.sets||[]).filter(s=>s.type==='working');
+        if(working.length){
+          const best=working.reduce((a,b)=>b.weight>a.weight||(b.weight===a.weight&&b.reps>a.reps)?b:a);
+          history.push({date:s.date,weight:best.weight,reps:best.reps,sets:working});
+        }
+      }
+    });
+  });
+  history.sort((a,b)=>a.date-b.date);
+
+  document.getElementById('modal-root').innerHTML=`
+    <div class="modal-overlay" id="modal-overlay">
+      <div class="modal" style="max-height:88vh;overflow:hidden;padding:0">
+        <div style="padding:14px 20px;border-bottom:1px solid var(--border);display:flex;align-items:flex-start;justify-content:space-between">
+          <div>
+            <div class="modal-title" style="font-size:16px">${exercise}</div>
+            <div style="font-size:12px;color:var(--text-muted);margin-top:2px">PR: ${pr.weight} lbs × ${pr.reps} · ${fmtDate(pr.date)}</div>
+          </div>
+          <button id="modal-cancel" style="background:none;border:none;color:var(--text-muted);font-size:22px;cursor:pointer;padding:4px;flex-shrink:0">✕</button>
+        </div>
+        <div style="overflow-y:auto;padding:16px;max-height:calc(88vh - 72px)">
+          ${history.length>=2?`
+            <div class="card-title" style="margin-bottom:8px">Weight Progression</div>
+            <div style="background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:12px;margin-bottom:16px">
+              ${renderProgressChart(history.map(h=>({date:h.date,weight:h.weight})))}
+            </div>`:``}
+          <div class="card-title" style="margin-bottom:8px">Session Log</div>
+          <div class="section-gap">
+            ${[...history].reverse().map(h=>`
+              <div style="background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:10px 14px">
+                <div style="font-size:12px;color:var(--text-muted);margin-bottom:4px">${fmtDate(h.date)}</div>
+                <div style="font-size:13px;color:var(--text-muted)">${h.sets.map(s=>`<span style="color:var(--text);font-weight:700">${s.weight}lbs</span> × ${s.reps}`).join(' · ')}</div>
+              </div>`).join('')}
+            ${history.length===0?'<div class="empty">No working sets logged yet</div>':''}
+          </div>
+        </div>
+      </div>
+    </div>`;
+  document.getElementById('modal-cancel').addEventListener('click',closeModal);
+  document.getElementById('modal-overlay').addEventListener('click',e=>{if(e.target===e.currentTarget)closeModal();});
 }
 
 function closeModal(){ document.getElementById('modal-root').innerHTML=''; }
