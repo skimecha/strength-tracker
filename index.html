@@ -167,6 +167,8 @@ const sb = createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true, storageKey: 'lockin-auth' }
 });
 
+const APP_VERSION = '2.2.0';
+
 // ─── EXERCISES ───────────────────────────────────────────────────────────────
 const EXERCISES = {
   'Chest':['Bench Press - Barbell','Bench Press - Dumbell','Cable Fly','Incline Bench Press - Barbell','Incline Bench Press - Dumbell','Incline Fly - Dumbell','Machine Fly','Machine Press'],
@@ -476,7 +478,8 @@ function renderLog(){
 function renderWorkoutScreen(){
   const hasSets=state._currentSession?.exercises?.length;
   return `
-    <div><div class="page-title">Log Workout</div><div class="subtitle">${fmtDate(Date.now())}</div></div>
+    <div style="display:flex;align-items:baseline;justify-content:space-between"><div class="page-title">Log Workout</div><div style="font-size:10px;color:var(--text-muted);font-weight:600">v${APP_VERSION}</div></div>
+    <div class="subtitle">${fmtDate(Date.now())}</div>
     ${hasSets?`<div style="background:var(--accent-dim);border:1px solid var(--accent);border-radius:var(--radius-sm);padding:10px 14px;font-size:13px;color:var(--accent);font-weight:700">↩ Resuming ${fmtDate(state._currentSession.date)} — ${state._currentSession.exercises.length} exercise${state._currentSession.exercises.length!==1?'s':''} logged. Add more or finish.</div>`:''}
     <div>
       <div class="card-title" style="margin-bottom:10px">Strength Training</div>
@@ -674,7 +677,7 @@ function renderNutrition(){
   const totals=todayEntries.reduce((a,e)=>({calories:a.calories+(e.calories||0),protein:a.protein+(e.protein||0),carbs:a.carbs+(e.carbs||0),fat:a.fat+(e.fat||0)}),{calories:0,protein:0,carbs:0,fat:0});
   const g=state.macroGoals;
   return `
-    <div class="page-header"><div><div class="page-title">Nutrition</div><div class="subtitle">${fmtDate(Date.now())}</div></div><button class="btn btn-outline btn-sm" id="edit-goals-btn">Goals</button></div>
+    <div class="page-header"><div><div class="page-title">Nutrition</div><div class="subtitle">${fmtDate(Date.now())}</div></div><div style="display:flex;align-items:center;gap:8px"><div style="font-size:10px;color:var(--text-muted);font-weight:600">v${APP_VERSION}</div><button class="btn btn-outline btn-sm" id="edit-goals-btn">Goals</button></div></div>
     <div class="card"><div class="card-title">Today's Totals</div><div style="text-align:center;margin-bottom:14px"><div style="font-size:42px;font-weight:800;color:var(--text)">${totals.calories}</div><div style="font-size:13px;color:var(--text-muted)">of ${g.calories} kcal goal</div></div>${macroBar('Protein','var(--accent)',totals.protein,g.protein,'g')}<div style="margin-top:10px">${macroBar('Carbs','var(--green)',totals.carbs,g.carbs,'g')}</div><div style="margin-top:10px">${macroBar('Fat','var(--amber)',totals.fat,g.fat,'g')}</div></div>
     ${state.mealFavorites.length?`<div class="card"><div class="card-title">Favorites — tap to log</div><div class="section-gap">${state.mealFavorites.map(f=>`<div style="display:flex;align-items:center;gap:10px"><div style="flex:1;min-width:0;cursor:pointer" data-log-fav="${f.id}"><div style="font-size:14px;font-weight:700;color:var(--text)">${f.name}</div><div style="font-size:12px;color:var(--text-muted);margin-top:1px">${f.calories} kcal · P:${f.protein}g C:${f.carbs}g F:${f.fat}g</div></div><button class="btn btn-outline btn-xs" data-log-fav="${f.id}" style="flex-shrink:0">+ Log</button><button class="fav-del" data-del-fav="${f.id}" title="Remove favorite">★</button></div>`).join('<hr class="divider" style="margin:2px 0">')}</div></div>`:''}
     <button class="btn btn-primary" id="add-food-btn">+ Add Food / Meal</button>
@@ -689,7 +692,7 @@ function renderBodyweight(){
   const latest=log[0];
   const unit=state.weightUnit;
   return `
-    <div class="page-header"><div class="page-title">Body Weight</div><div class="toggle-group" style="width:auto"><div class="toggle-opt ${unit==='lbs'?'active':''}" data-wunit="lbs" style="padding:7px 14px;font-size:13px">lbs</div><div class="toggle-opt ${unit==='kg'?'active':''}" data-wunit="kg" style="padding:7px 14px;font-size:13px">kg</div></div></div>
+    <div class="page-header"><div class="page-title">Body Weight</div><div style="display:flex;align-items:center;gap:8px"><div style="font-size:10px;color:var(--text-muted);font-weight:600">v${APP_VERSION}</div><div class="toggle-group" style="width:auto"><div class="toggle-opt ${unit==='lbs'?'active':''}" data-wunit="lbs" style="padding:7px 14px;font-size:13px">lbs</div><div class="toggle-opt ${unit==='kg'?'active':''}" data-wunit="kg" style="padding:7px 14px;font-size:13px">kg</div></div></div></div>
     ${latest?`<div class="stat-grid"><div class="stat-card"><div class="stat-val">${displayWeight(latest)}</div><div class="stat-label">Latest</div></div><div class="stat-card"><div class="stat-val">${state.weightLog.length}</div><div class="stat-label">Entries</div></div></div>`:''}
     <div class="card"><div class="card-title">Log Today's Weight</div><div class="field"><label>Weight (${unit})</label><input type="number" id="wt-input" placeholder="e.g. 185" step="0.1" style="font-size:22px;text-align:center;font-weight:800"></div><button class="btn btn-primary" id="log-weight-btn" style="margin-top:10px">Log Weight</button></div>
     ${log.length?`<div class="card"><div class="card-title">History</div><div class="wt-list">${log.slice(0,30).map(e=>`<div class="wt-row"><div class="wt-date">${fmtDate(e.date)}</div><div style="display:flex;align-items:center;gap:10px"><div class="wt-val">${displayWeight(e)}</div><button class="wt-del" data-del-wt="${e.id}">✕</button></div></div>`).join('')}</div></div><div style="font-size:11px;color:var(--text-muted);text-align:center">Export all data from the History tab</div>`:''}`;
@@ -703,7 +706,10 @@ function renderHistory(){
   return `
     <div class="page-header">
       <div class="page-title">History</div>
-      ${sessions.length?`<button class="btn btn-outline btn-sm" id="export-csv">⬇ Export</button>`:''}
+      <div style="display:flex;align-items:center;gap:8px">
+        <div style="font-size:10px;color:var(--text-muted);font-weight:600">v${APP_VERSION}</div>
+        ${sessions.length?`<button class="btn btn-outline btn-sm" id="export-csv">⬇ Export</button>`:''}
+      </div>
     </div>
     ${sessions.length===0?'<div class="empty">No workouts logged yet.</div>':sessions.map(s=>`
       <div class="history-session">
@@ -731,7 +737,7 @@ function renderHistory(){
 // ── MORE ──────────────────────────────────────────────────────────────────────
 function renderMore(){
   return `
-    <div class="page-title">More</div>
+    <div style="display:flex;align-items:baseline;justify-content:space-between"><div class="page-title">More</div><div style="font-size:10px;color:var(--text-muted);font-weight:600">v${APP_VERSION}</div></div>
     <div class="card">
       <div class="card-title">Account</div>
       <div style="font-size:14px;color:var(--text);margin-bottom:14px">${currentUser?.email||''}</div>
