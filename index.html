@@ -120,6 +120,8 @@ select:focus,input:focus{outline:none;border-color:var(--accent)}
 .section-gap{display:flex;flex-direction:column;gap:10px}
 .fav-del{background:none;border:none;color:var(--amber);font-size:20px;cursor:pointer;padding:2px 6px;flex-shrink:0;line-height:1}
 .pr-card:active{border-color:var(--accent)}
+.period-btn{flex-shrink:0;padding:5px 11px;background:var(--surface2);border:1px solid var(--border);border-radius:20px;color:var(--text-muted);font-size:12px;font-weight:700;cursor:pointer;transition:background .1s,color .1s,border-color .1s}
+.period-btn.active{background:var(--accent-dim);border-color:var(--accent);color:var(--accent)}
 .timer-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:14px 16px}
 .timer-card.running{border-color:var(--accent)}
 .timer-card.done{border-color:var(--green)}
@@ -168,7 +170,7 @@ const sb = createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true, storageKey: 'lockin-auth' }
 });
 
-const APP_VERSION = '2.6.0';
+const APP_VERSION = '2.7.0';
 
 // ─── EXERCISES ───────────────────────────────────────────────────────────────
 const EXERCISES = {
@@ -199,6 +201,8 @@ let state = {
   pendingSets:[],_currentSession:null,
   sessions:[],prs:{},favorites:[],
   historyTab:'sessions',
+  weightView:'list', weightPeriod:'1m',
+  nutritionView:'log', nutritionPeriod:'1m',
   timer:{remaining:0,total:0,interval:null,running:false},
   favFilter:false,searchQ:'',
   macroGoals:{calories:2500,protein:180,carbs:250,fat:80},
@@ -673,18 +677,81 @@ function logCardioActivity(){
 
 function fmtDuration(secs){ const m=Math.floor(secs/60); const s=secs%60; return s>0?`${m}m ${s}s`:`${m}m`; }
 
+const PERIODS=['7d','14d','1m','3m','6m','1y','2y'];
+function periodMs(p){ const d={'7d':7,'14d':14,'1m':30,'3m':90,'6m':180,'1y':365,'2y':730}; return (d[p]||30)*86400000; }
+
+function renderWeightChartSVG(period,unit){
+  const cutoff=Date.now()-periodMs(period);
+  const filtered=[...state.weightLog].filter(e=>e.date>=cutoff).sort((a,b)=>a.date-b.date);
+  if(filtered.length<2) return `<div style="text-align:center;color:var(--text-muted);padding:20px;font-size:13px">Need at least 2 entries in this period to show a chart</div>`;
+  const points=filtered.map(e=>({
+    date:e.date,
+    weight: unit==='kg'
+      ?(e.unit==='kg'?parseFloat(e.value):parseFloat(lbsToKg(e.value)))
+      :(e.unit==='lbs'?parseFloat(e.value):parseFloat(kgToLbs(e.value)))
+  }));
+  return renderProgressChart(points);
+}
+
+function renderCalorieBarChart(period){
+  const cutoff=Date.now()-periodMs(period);
+  const byDate={};
+  state.foodLog.forEach(e=>{
+    const ms=new Date(e.date).getTime();
+    if(ms>=cutoff) byDate[e.date]=(byDate[e.date]||0)+(e.calories||0);
+  });
+  const entries=Object.entries(byDate).map(([date,cal])=>({date:new Date(date).getTime(),cal})).sort((a,b)=>a.date-b.date);
+  if(!entries.length) return `<div class="empty">No nutrition data for this period</div>`;
+  const goal=state.macroGoals.calories;
+  const W=360,H=180,PAD={top:16,right:28,bottom:28,left:44};
+  const cW=W-PAD.left-PAD.right,cH=H-PAD.top-PAD.bottom;
+  const maxCal=Math.max(...entries.map(e=>e.cal),goal)*1.1;
+  const n=entries.length;
+  const barW=Math.min(22,Math.max(4,(cW/n)*0.65));
+  const toX=i=>PAD.left+(n===1?cW/2:(i/(n-1))*cW);
+  const toY=c=>PAD.top+cH-(c/maxCal)*cH;
+  const goalY=toY(goal);
+  const yVals=[0,Math.round(maxCal/2),Math.round(maxCal)];
+  return `<svg viewBox="0 0 ${W} ${H}" style="width:100%;display:block">
+    ${yVals.map(c=>{const y=toY(c);return `<line x1="${PAD.left}" y1="${y.toFixed(1)}" x2="${W-PAD.right}" y2="${y.toFixed(1)}" stroke="var(--border)" stroke-width="1"/>
+    <text x="${PAD.left-6}" y="${(y+4).toFixed(1)}" text-anchor="end" fill="var(--text-muted)" font-size="9" font-family="system-ui">${c}</text>`;}).join('')}
+    <line x1="${PAD.left}" y1="${goalY.toFixed(1)}" x2="${W-PAD.right}" y2="${goalY.toFixed(1)}" stroke="var(--amber)" stroke-width="1.5" stroke-dasharray="4,3"/>
+    <text x="${(W-PAD.right+2)}" y="${(goalY-3).toFixed(1)}" fill="var(--amber)" font-size="9" font-family="system-ui">goal</text>
+    ${entries.map((e,i)=>{const x=toX(i),y=toY(e.cal),h=Math.max(2,cH-(y-PAD.top));const color=e.cal>goal?'var(--amber)':'var(--accent)';return `<rect x="${(x-barW/2).toFixed(1)}" y="${y.toFixed(1)}" width="${barW.toFixed(1)}" height="${h.toFixed(1)}" fill="${color}" rx="2"/>`;}).join('')}
+    <text x="${toX(0).toFixed(1)}" y="${H-4}" text-anchor="start" fill="var(--text-muted)" font-size="9" font-family="system-ui">${fmtDateShort(entries[0].date)}</text>
+    ${n>1?`<text x="${toX(n-1).toFixed(1)}" y="${H-4}" text-anchor="end" fill="var(--text-muted)" font-size="9" font-family="system-ui">${fmtDateShort(entries[n-1].date)}</text>`:''}
+  </svg>`;
+}
+
 // ── NUTRITION ─────────────────────────────────────────────────────────────────
 function renderNutrition(){
   const todayEntries=state.foodLog.filter(e=>e.date===todayKey());
   const totals=todayEntries.reduce((a,e)=>({calories:a.calories+(e.calories||0),protein:a.protein+(e.protein||0),carbs:a.carbs+(e.carbs||0),fat:a.fat+(e.fat||0)}),{calories:0,protein:0,carbs:0,fat:0});
   const g=state.macroGoals;
+  const view=state.nutritionView;
+  const period=state.nutritionPeriod;
   return `
     <div class="page-header"><div><div class="page-title">Nutrition</div><div class="subtitle">${fmtDate(Date.now())}</div></div><div style="display:flex;align-items:center;gap:8px"><div style="font-size:10px;color:var(--text-muted);font-weight:600">v${APP_VERSION}</div><button class="btn btn-outline btn-sm" id="edit-goals-btn">Goals</button></div></div>
     <div class="card"><div class="card-title">Today's Totals</div><div style="text-align:center;margin-bottom:14px"><div style="font-size:42px;font-weight:800;color:var(--text)">${totals.calories}</div><div style="font-size:13px;color:var(--text-muted)">of ${g.calories} kcal goal</div></div>${macroBar('Protein','var(--accent)',totals.protein,g.protein,'g')}<div style="margin-top:10px">${macroBar('Carbs','var(--green)',totals.carbs,g.carbs,'g')}</div><div style="margin-top:10px">${macroBar('Fat','var(--amber)',totals.fat,g.fat,'g')}</div></div>
-    ${state.mealFavorites.length?`<div class="card"><div class="card-title">Favorites — tap to log</div><div class="section-gap">${state.mealFavorites.map(f=>`<div style="display:flex;align-items:center;gap:10px"><div style="flex:1;min-width:0;cursor:pointer" data-log-fav="${f.id}"><div style="font-size:14px;font-weight:700;color:var(--text)">${f.name}</div><div style="font-size:12px;color:var(--text-muted);margin-top:1px">${f.calories} kcal · P:${f.protein}g C:${f.carbs}g F:${f.fat}g</div></div><button class="btn btn-outline btn-xs" data-log-fav="${f.id}" style="flex-shrink:0">+ Log</button><button class="fav-del" data-del-fav="${f.id}" title="Remove favorite">★</button></div>`).join('<hr class="divider" style="margin:2px 0">')}</div></div>`:''}
-    <button class="btn btn-primary" id="add-food-btn">+ Add Food / Meal</button>
-    ${todayEntries.length?`<div class="card"><div class="card-title">Today's Log</div><div class="section-gap">${[...todayEntries].reverse().map(e=>`<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:8px"><div style="flex:1;min-width:0"><div style="font-size:14px;font-weight:700;color:var(--text)">${e.name}</div><div style="font-size:12px;color:var(--text-muted);margin-top:2px">${fmtTime(e.ts)} · P:${e.protein}g C:${e.carbs}g F:${e.fat}g</div></div><div style="text-align:right;flex-shrink:0;display:flex;flex-direction:column;align-items:flex-end;gap:4px"><div style="font-size:16px;font-weight:800;color:var(--text)">${e.calories} kcal</div><div style="display:flex;gap:6px"><button class="btn btn-xs ${isMealFav(e)?'btn-amber':'btn-outline'}" data-fav-food="${e.id}" title="${isMealFav(e)?'Remove from favorites':'Save as favorite'}">★</button><button class="btn btn-xs btn-danger" data-del-food="${e.id}">✕</button></div></div></div>`).join('<hr class="divider" style="margin:2px 0">')}</div></div>`:''}
-    <div style="font-size:11px;color:var(--text-muted);text-align:center">Export all data from the History tab</div>`;
+    <div class="toggle-group">
+      <div class="toggle-opt ${view==='log'?'active':''}" data-nutview="log">Log</div>
+      <div class="toggle-opt ${view==='chart'?'active':''}" data-nutview="chart">Chart</div>
+    </div>
+    ${view==='log'?`
+      ${state.mealFavorites.length?`<div class="card"><div class="card-title">Favorites — tap to log</div><div class="section-gap">${state.mealFavorites.map(f=>`<div style="display:flex;align-items:center;gap:10px"><div style="flex:1;min-width:0;cursor:pointer" data-log-fav="${f.id}"><div style="font-size:14px;font-weight:700;color:var(--text)">${f.name}</div><div style="font-size:12px;color:var(--text-muted);margin-top:1px">${f.calories} kcal · P:${f.protein}g C:${f.carbs}g F:${f.fat}g</div></div><button class="btn btn-outline btn-xs" data-log-fav="${f.id}" style="flex-shrink:0">+ Log</button><button class="fav-del" data-del-fav="${f.id}" title="Remove favorite">★</button></div>`).join('<hr class="divider" style="margin:2px 0">')}</div></div>`:''}
+      <button class="btn btn-primary" id="add-food-btn">+ Add Food / Meal</button>
+      ${todayEntries.length?`<div class="card"><div class="card-title">Today's Log</div><div class="section-gap">${[...todayEntries].reverse().map(e=>`<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:8px"><div style="flex:1;min-width:0"><div style="font-size:14px;font-weight:700;color:var(--text)">${e.name}</div><div style="font-size:12px;color:var(--text-muted);margin-top:2px">${fmtTime(e.ts)} · P:${e.protein}g C:${e.carbs}g F:${e.fat}g</div></div><div style="text-align:right;flex-shrink:0;display:flex;flex-direction:column;align-items:flex-end;gap:4px"><div style="font-size:16px;font-weight:800;color:var(--text)">${e.calories} kcal</div><div style="display:flex;gap:6px"><button class="btn btn-xs ${isMealFav(e)?'btn-amber':'btn-outline'}" data-fav-food="${e.id}" title="${isMealFav(e)?'Remove from favorites':'Save as favorite'}">★</button><button class="btn btn-xs btn-danger" data-del-food="${e.id}">✕</button></div></div></div>`).join('<hr class="divider" style="margin:2px 0">')}</div></div>`:''}
+      <div style="font-size:11px;color:var(--text-muted);text-align:center">Export all data from the History tab</div>
+    `:`
+      <div style="display:flex;gap:6px;overflow-x:auto;padding-bottom:2px">
+        ${PERIODS.map(p=>`<button class="period-btn ${period===p?'active':''}" data-nutperiod="${p}">${p}</button>`).join('')}
+      </div>
+      <div class="card">
+        <div class="card-title" style="margin-bottom:4px">Daily Calories</div>
+        <div style="font-size:11px;color:var(--text-muted);margin-bottom:10px">Blue = under goal · Amber = over goal · Dashed = your goal</div>
+        ${renderCalorieBarChart(period)}
+      </div>
+    `}`;
 }
 function macroBar(label,color,val,goal,unit){ const pct=goal>0?Math.min(100,Math.round(val/goal*100)):0; return `<div class="macro-row"><span class="macro-label">${label}</span><span class="macro-val">${val}/${goal}${unit}</span></div><div class="macro-bar-wrap"><div class="macro-bar" style="width:${pct}%;background:${color}"></div></div>`; }
 
@@ -693,11 +760,30 @@ function renderBodyweight(){
   const log=[...state.weightLog].reverse();
   const latest=log[0];
   const unit=state.weightUnit;
+  const view=state.weightView;
+  const period=state.weightPeriod;
   return `
     <div class="page-header"><div class="page-title">Body Weight</div><div style="display:flex;align-items:center;gap:8px"><div style="font-size:10px;color:var(--text-muted);font-weight:600">v${APP_VERSION}</div><div class="toggle-group" style="width:auto"><div class="toggle-opt ${unit==='lbs'?'active':''}" data-wunit="lbs" style="padding:7px 14px;font-size:13px">lbs</div><div class="toggle-opt ${unit==='kg'?'active':''}" data-wunit="kg" style="padding:7px 14px;font-size:13px">kg</div></div></div></div>
     ${latest?`<div class="stat-grid"><div class="stat-card"><div class="stat-val">${displayWeight(latest)}</div><div class="stat-label">Latest</div></div><div class="stat-card"><div class="stat-val">${state.weightLog.length}</div><div class="stat-label">Entries</div></div></div>`:''}
     <div class="card"><div class="card-title">Log Today's Weight</div><div class="field"><label>Weight (${unit})</label><input type="number" id="wt-input" placeholder="e.g. 185" step="0.1" style="font-size:22px;text-align:center;font-weight:800"></div><button class="btn btn-primary" id="log-weight-btn" style="margin-top:10px">Log Weight</button></div>
-    ${log.length?`<div class="card"><div class="card-title">History</div><div class="wt-list">${log.slice(0,30).map(e=>`<div class="wt-row"><div class="wt-date">${fmtDate(e.date)}</div><div style="display:flex;align-items:center;gap:10px"><div class="wt-val">${displayWeight(e)}</div><button class="wt-del" data-del-wt="${e.id}">✕</button></div></div>`).join('')}</div></div><div style="font-size:11px;color:var(--text-muted);text-align:center">Export all data from the History tab</div>`:''}`;
+    ${log.length?`
+    <div class="toggle-group">
+      <div class="toggle-opt ${view==='list'?'active':''}" data-wtview="list">List</div>
+      <div class="toggle-opt ${view==='chart'?'active':''}" data-wtview="chart">Chart</div>
+    </div>
+    ${view==='chart'?`
+      <div style="display:flex;gap:6px;overflow-x:auto;padding-bottom:2px">
+        ${PERIODS.map(p=>`<button class="period-btn ${period===p?'active':''}" data-wtperiod="${p}">${p}</button>`).join('')}
+      </div>
+      <div style="background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:12px">
+        ${renderWeightChartSVG(period,unit)}
+      </div>
+    `:`
+      <div class="wt-list">
+        ${log.slice(0,30).map(e=>`<div class="wt-row"><div class="wt-date">${fmtDate(e.date)}</div><div style="display:flex;align-items:center;gap:10px"><div class="wt-val">${displayWeight(e)}</div><button class="wt-del" data-del-wt="${e.id}">✕</button></div></div>`).join('')}
+      </div>
+    `}
+    <div style="font-size:11px;color:var(--text-muted);text-align:center">Export all data from the History tab</div>`:''}`;
 }
 
 // ── HISTORY ───────────────────────────────────────────────────────────────────
@@ -865,6 +951,11 @@ function attachEvents(){
 
   document.querySelectorAll('.resume-btn').forEach(b=>b.addEventListener('click',()=>{ if(!b.disabled) resumeSession(b.dataset.resume); }));
   document.querySelectorAll('.del-session-btn').forEach(b=>b.addEventListener('click',()=>{ if(confirm('Delete this workout session?')){ state.sessions=state.sessions.filter(s=>s.id!==b.dataset.delSession); dbDeleteSession(b.dataset.delSession); render(); } }));
+
+  document.querySelectorAll('[data-nutview]').forEach(b=>b.addEventListener('click',()=>{ state.nutritionView=b.dataset.nutview; render(); }));
+  document.querySelectorAll('[data-nutperiod]').forEach(b=>b.addEventListener('click',()=>{ state.nutritionPeriod=b.dataset.nutperiod; render(); }));
+  document.querySelectorAll('[data-wtview]').forEach(b=>b.addEventListener('click',()=>{ state.weightView=b.dataset.wtview; render(); }));
+  document.querySelectorAll('[data-wtperiod]').forEach(b=>b.addEventListener('click',()=>{ state.weightPeriod=b.dataset.wtperiod; render(); }));
 
   document.querySelectorAll('[data-histtab]').forEach(b=>b.addEventListener('click',()=>{ state.historyTab=b.dataset.histtab; render(); }));
   document.querySelectorAll('.pr-card').forEach(b=>b.addEventListener('click',()=>showPRModal(b.dataset.pr)));
