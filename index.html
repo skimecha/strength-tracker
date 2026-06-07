@@ -167,7 +167,7 @@ const sb = createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true, storageKey: 'lockin-auth' }
 });
 
-const APP_VERSION = '2.3.0';
+const APP_VERSION = '2.4.0';
 
 // ─── EXERCISES ───────────────────────────────────────────────────────────────
 const EXERCISES = {
@@ -745,9 +745,12 @@ function renderMore(){
       <button class="btn btn-outline btn-full" id="update-password-btn">Update Password</button>
     </div>
 
-    <div class="card" style="opacity:.45">
+    <div class="card">
       <div class="card-title">Disclosures</div>
-      <div style="font-size:13px;color:var(--text-muted)">Privacy Policy · Terms of Service — coming soon</div>
+      <div style="display:flex;flex-direction:column;gap:10px">
+        <button class="btn btn-outline btn-full" id="show-privacy-btn">Privacy Policy</button>
+        <button class="btn btn-outline btn-full" id="show-tos-btn">Terms of Service</button>
+      </div>
     </div>
     <div class="card" style="opacity:.45">
       <div class="card-title">Support</div>
@@ -840,6 +843,8 @@ function attachEvents(){
   el('logout-btn',handleLogout);
   el('update-password-btn', showUpdatePasswordModal);
   el('delete-account-btn',  showDeleteAccountModal);
+  el('show-privacy-btn', ()=>showPolicyModal('Privacy Policy', PRIVACY_POLICY));
+  el('show-tos-btn',     ()=>showPolicyModal('Terms of Service', TERMS_OF_SERVICE));
 
   el('edit-goals-btn',showGoalsModal);
   el('add-food-btn',showAddFoodModal);
@@ -1022,6 +1027,105 @@ async function deleteUserAccount(){
     closeModal();
     toast('Deletion failed: '+err.message,'var(--red)');
   }
+}
+
+const PRIVACY_POLICY = `<div style="font-size:14px;line-height:1.8;color:var(--text)">
+<p style="color:var(--text-muted);font-size:12px;margin-bottom:16px">Effective Date: June 7, 2026</p>
+
+<p style="margin-bottom:14px">Lock In: Strength ("we," "us," or "our") is a personal fitness tracking application. This Privacy Policy explains what data we collect, how we use it, and your rights.</p>
+
+<p style="font-weight:800;margin-bottom:6px;color:var(--accent)">1. WHO CAN USE THIS APP</p>
+<p style="margin-bottom:14px">Lock In: Strength is intended for users 18 years of age and older. By registering, you confirm that you are at least 18. We do not knowingly collect data from anyone under 18. If we become aware that a user is under 18, we will delete their account and data promptly.</p>
+
+<p style="font-weight:800;margin-bottom:6px;color:var(--accent)">2. WHAT DATA WE COLLECT</p>
+<p style="margin-bottom:8px">We collect only data that you provide directly:</p>
+<ul style="margin-left:18px;margin-bottom:14px">
+<li>Email address (used to create and identify your account)</li>
+<li>Workout sessions (exercises, sets, weights, reps)</li>
+<li>Cardio sessions (activity, duration, distance, heart rate)</li>
+<li>Body weight entries</li>
+<li>Nutrition logs (food names, calories, macros)</li>
+<li>Meal favorites and exercise favorites</li>
+<li>Personal records</li>
+</ul>
+<p style="margin-bottom:14px">We do not collect location data, device identifiers, behavioral analytics, or data from third-party sources.</p>
+
+<p style="font-weight:800;margin-bottom:6px;color:var(--accent)">3. HOW WE USE YOUR DATA</p>
+<p style="margin-bottom:14px">Your data is used solely to provide the app's functionality. We do not sell your data. We do not share it with advertisers or third parties for marketing purposes. We do not use your data to train AI models.</p>
+
+<p style="font-weight:800;margin-bottom:6px;color:var(--accent)">4. HOW YOUR DATA IS STORED</p>
+<p style="margin-bottom:14px">Your data is stored in a cloud database provided by Supabase (supabase.com), hosted in the United States. Row Level Security policies ensure that your data is accessible only to your authenticated account. The application administrator has administrative access to the database and may access user data solely in the event of a technical issue at your explicit request. We commit to never accessing, using, or sharing your data for any other purpose.</p>
+
+<p style="font-weight:800;margin-bottom:6px;color:var(--accent)">5. DATA RETENTION AND DELETION</p>
+<p style="margin-bottom:14px">You may delete your account at any time from the More tab. Upon deletion, all of your data is permanently removed from the live database immediately. Database backups maintained by our infrastructure provider may retain copies of your data for up to 30 days following deletion. These backups are not accessible through the application and are automatically purged on a rolling basis.</p>
+
+<p style="font-weight:800;margin-bottom:6px;color:var(--accent)">6. SIGN IN WITH GOOGLE</p>
+<p style="margin-bottom:14px">If you sign in using Google, Google authenticates your identity and shares your email address with us. We do not receive your Google password or any other Google account data. Google's handling of your data is governed by Google's Privacy Policy.</p>
+
+<p style="font-weight:800;margin-bottom:6px;color:var(--accent)">7. YOUR RIGHTS</p>
+<p style="margin-bottom:14px">You have the right to export all your data at any time using the Export function in the History tab, correct your data within the app, delete your account and all associated data from the More tab, and contact us at lockinstrength@gmail.com with any privacy questions.</p>
+
+<p style="font-weight:800;margin-bottom:6px;color:var(--accent)">8. CHANGES TO THIS POLICY</p>
+<p style="margin-bottom:14px">We may update this Privacy Policy from time to time. The Effective Date at the top will reflect the most recent revision. Continued use of the app after a policy change constitutes acceptance of the updated terms.</p>
+
+<p style="font-weight:800;margin-bottom:6px;color:var(--accent)">9. CONTACT</p>
+<p>lockinstrength@gmail.com</p>
+</div>`;
+
+const TERMS_OF_SERVICE = `<div style="font-size:14px;line-height:1.8;color:var(--text)">
+<p style="color:var(--text-muted);font-size:12px;margin-bottom:16px">Effective Date: June 7, 2026</p>
+
+<p style="margin-bottom:14px">These Terms of Service ("Terms") govern your use of Lock In: Strength. By creating an account, you agree to these Terms.</p>
+
+<p style="font-weight:800;margin-bottom:6px;color:var(--accent)">1. ELIGIBILITY</p>
+<p style="margin-bottom:14px">You must be at least 18 years old to use Lock In: Strength. By using the app, you represent that you meet this requirement.</p>
+
+<p style="font-weight:800;margin-bottom:6px;color:var(--accent)">2. YOUR ACCOUNT</p>
+<p style="margin-bottom:14px">You are responsible for maintaining the confidentiality of your login credentials. You agree to provide accurate information when registering and to notify us at lockinstrength@gmail.com if you believe your account has been compromised. Each person may maintain one account.</p>
+
+<p style="font-weight:800;margin-bottom:6px;color:var(--accent)">3. ACCEPTABLE USE</p>
+<p style="margin-bottom:8px">You agree to use Lock In: Strength only for its intended purpose — personal fitness tracking. You agree not to:</p>
+<ul style="margin-left:18px;margin-bottom:14px">
+<li>Attempt to access another user's data</li>
+<li>Reverse engineer, copy, or redistribute the application</li>
+<li>Use the app in any way that violates applicable law</li>
+</ul>
+
+<p style="font-weight:800;margin-bottom:6px;color:var(--accent)">4. NOT MEDICAL ADVICE</p>
+<p style="margin-bottom:14px">Lock In: Strength is a fitness logging tool, not a medical application. Nothing in the app constitutes medical advice. Consult a qualified healthcare provider before beginning any fitness or nutrition program, particularly if you have a pre-existing medical condition.</p>
+
+<p style="font-weight:800;margin-bottom:6px;color:var(--accent)">5. YOUR DATA</p>
+<p style="margin-bottom:14px">You own your data. We do not claim any rights to the content you record in the app. You may export or delete your data at any time. See our Privacy Policy for full details.</p>
+
+<p style="font-weight:800;margin-bottom:6px;color:var(--accent)">6. SERVICE AVAILABILITY</p>
+<p style="margin-bottom:14px">We provide Lock In: Strength on an "as is" basis. We make no guarantees of uptime or error-free operation. We strongly encourage regular use of the Export function to maintain your own backup of your data.</p>
+
+<p style="font-weight:800;margin-bottom:6px;color:var(--accent)">7. LIMITATION OF LIABILITY</p>
+<p style="margin-bottom:14px">To the fullest extent permitted by law, the application owner and administrator shall not be liable for any indirect, incidental, or consequential damages arising from your use of Lock In: Strength, including loss of data, physical injury, or financial loss.</p>
+
+<p style="font-weight:800;margin-bottom:6px;color:var(--accent)">8. CHANGES TO THESE TERMS</p>
+<p style="margin-bottom:14px">We may update these Terms from time to time. The Effective Date above will reflect the most recent revision. Continued use of the app after changes take effect constitutes acceptance of the revised Terms.</p>
+
+<p style="font-weight:800;margin-bottom:6px;color:var(--accent)">9. GOVERNING LAW</p>
+<p style="margin-bottom:14px">These Terms are governed by the laws of the State of Florida, United States.</p>
+
+<p style="font-weight:800;margin-bottom:6px;color:var(--accent)">10. CONTACT</p>
+<p>lockinstrength@gmail.com</p>
+</div>`;
+
+function showPolicyModal(title, content){
+  document.getElementById('modal-root').innerHTML=`
+    <div class="modal-overlay" id="modal-overlay">
+      <div class="modal" style="max-height:85vh;overflow:hidden;padding:0">
+        <div style="padding:16px 20px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between">
+          <div class="modal-title">${title}</div>
+          <button id="modal-cancel" style="background:none;border:none;color:var(--text-muted);font-size:22px;cursor:pointer;padding:4px">✕</button>
+        </div>
+        <div style="overflow-y:auto;padding:20px;max-height:calc(85vh - 60px)">${content}</div>
+      </div>
+    </div>`;
+  document.getElementById('modal-cancel').addEventListener('click',closeModal);
+  document.getElementById('modal-overlay').addEventListener('click',e=>{ if(e.target===e.currentTarget) closeModal(); });
 }
 
 function closeModal(){ document.getElementById('modal-root').innerHTML=''; }
