@@ -44,7 +44,7 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:'Segoe 
 .auth-msg.success{background:var(--green-dim);border:1px solid var(--green);color:var(--green);display:block}
 
 /* ── APP ── */
-#screen-app{max-width:480px;margin:0 auto;min-height:100vh;display:none;flex-direction:column}
+#screen-app{max-width:480px;margin:0 auto;height:100vh;height:100dvh;overflow:hidden;display:none;flex-direction:column}
 .nav{display:flex;background:var(--surface);border-top:1px solid var(--border);flex-shrink:0;padding-bottom:env(safe-area-inset-bottom)}
 .nav-btn{flex:1;padding:9px 4px 12px;background:none;border:none;border-top:2px solid transparent;color:var(--text-muted);font-size:10px;font-weight:600;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:3px;transition:color .15s}
 .nav-btn svg{width:20px;height:20px}
@@ -177,7 +177,7 @@ const sb = createClient(SUPABASE_URL, SUPABASE_KEY, {
 function isDemo(){ return currentUser?.email === DEMO_EMAIL; }
 function demoBlock(){ toast('Sign up to track your own data →','var(--accent)'); }
 
-const APP_VERSION = '2.9.1';
+const APP_VERSION = '2.9.2';
 const DEMO_EMAIL    = 'demo@lockinstrength.com';
 const DEMO_PASSWORD = 'shJ*WwBy9OYj54&P';
 
