@@ -45,10 +45,10 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:'Segoe 
 
 /* ── APP ── */
 #screen-app{max-width:480px;margin:0 auto;min-height:100vh;display:none;flex-direction:column}
-.nav{display:flex;background:var(--surface);border-bottom:1px solid var(--border);flex-shrink:0}
-.nav-btn{flex:1;padding:12px 4px 9px;background:none;border:none;color:var(--text-muted);font-size:10px;font-weight:600;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:3px;transition:color .15s}
+.nav{display:flex;background:var(--surface);border-top:1px solid var(--border);flex-shrink:0;padding-bottom:env(safe-area-inset-bottom)}
+.nav-btn{flex:1;padding:9px 4px 12px;background:none;border:none;border-top:2px solid transparent;color:var(--text-muted);font-size:10px;font-weight:600;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:3px;transition:color .15s}
 .nav-btn svg{width:20px;height:20px}
-.nav-btn.active{color:var(--accent);border-bottom:2px solid var(--accent)}
+.nav-btn.active{color:var(--accent);border-top:2px solid var(--accent)}
 .view{display:none;flex:1;overflow-y:auto;padding:16px;padding-bottom:24px}
 .view.active{display:flex;flex-direction:column;gap:14px}
 .card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:14px 16px}
@@ -156,8 +156,8 @@ select:focus,input:focus{outline:none;border-color:var(--accent)}
 
 <div id="screen-app">
   <div id="demo-banner-wrap"></div>
-  <div id="nav-wrap"></div>
   <div id="views-wrap" style="flex:1;display:flex;flex-direction:column;overflow:hidden"></div>
+  <div id="nav-wrap"></div>
 </div>
 
 <div class="toast" id="toast"></div>
@@ -177,7 +177,7 @@ const sb = createClient(SUPABASE_URL, SUPABASE_KEY, {
 function isDemo(){ return currentUser?.email === DEMO_EMAIL; }
 function demoBlock(){ toast('Sign up to track your own data →','var(--accent)'); }
 
-const APP_VERSION = '2.9.0';
+const APP_VERSION = '2.9.1';
 const DEMO_EMAIL    = 'demo@lockinstrength.com';
 const DEMO_PASSWORD = 'shJ*WwBy9OYj54&P';
 
