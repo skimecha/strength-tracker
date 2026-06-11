@@ -170,24 +170,34 @@ const sb = createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true, storageKey: 'lockin-auth' }
 });
 
-const APP_VERSION = '2.7.3';
+const APP_VERSION = '2.8.0';
 
-// ─── EXERCISES ───────────────────────────────────────────────────────────────
+// ─── GROUPS & EXERCISES ───────────────────────────────────────────────────────
+const GROUPS = {
+  'Chest':     ['Chest'],
+  'Back':      ['Back','Lats'],
+  'Shoulders': ['Delts (Front)','Delts (Middle)','Delts (Rear)'],
+  'Arms':      ['Biceps','Triceps','Forearms / Grip'],
+  'Core':      ['Abdominals'],
+  'Legs':      ['Quads','Hamstrings','Glutes','Calves','Hips']
+};
+
 const EXERCISES = {
-  'Chest':['Bench Press - Barbell','Bench Press - Dumbell','Cable Fly','Incline Bench Press - Barbell','Incline Bench Press - Dumbell','Incline Fly - Dumbell','Machine Fly','Machine Press'],
-  'Back':['Cable Row','Deadlift','Deadlift - Romanian','Dumbell Row - One Arm','Face Pulls','Hyperextensions','Machine Row','Reverse Fly - Dumbell','Reverse Fly - Machine','Romainian Deadlift','Row - Barbell','Row - Cable','Row - Dumbell One Arm','T-Bar Row'],
-  'Lats':['Cable Pulldown - Wide Grip','Cable Row','Diverging Lat Pulldown','Machine Assisted Pull-ups','Pull-ups','T-Bar Row'],
-  'Triceps':['Extension - Cable (One-Arm)','Overhead Extension - Barbell','Overhead Extension - Cable (Two-Hand Bar)','Overhead Extension - Dumbell','Skull Crushers - Barbell','Skull Crushers - Dumbell','Tricep Pushdown - Cable (Two-Hand Bar)'],
-  'Biceps':['Curls - Dumbell (Decline)','Curls - Dumbell (Incline)','Curls - Dumbell (Standing)','Curls - Preacher (EZ Bar)','Curls - Preacher (Flat Bar)','Curls - Preacher (Machine)','Hammer Curls (Preacher)','Hammer Curls (Standing)'],
-  'Delts (Front)':['Dumbell Raise - Standing Front','Overhead Press - Dumbbell (seated)','Overhead Press - Machine'],
-  'Delts (Middle)':['Cable Lateral Raise - Hip Height','Cable Raise - Floor Height','Dumbell Raise - Standing Lateral'],
-  'Delts (Rear)':['Dumbell Raise - Seated (Decline)','Face Pulls','Rotator Cuff - Cable','Rotator Cuff - Flat Bench'],
-  'Forearms / Grip':['Curl - Dumbell','Reverse Curl - Dumbell'],
-  'Quads':['Bulgarian Split Squats','Leg Extensions','Lunges','Pistol Squats','Sissy Squats','Squats'],
-  'Hamstrings':['Bulgarian Split Squats','Good Morning - Barbell','Leg Curls','RDL'],
-  'Glutes':['Bulgarian Split Squats','Hip Abductors','Hip Adductors','Lunges','Squats'],
-  'Calves':['Calf Raises','Tib Raises'],
-  'Hips':['Hip Abductors','Hip Adductors']
+  'Chest':['Bench Press - Barbell','Bench Press - Dumbell','Cable Fly','Chest Dip','Decline Bench Press - Barbell','Decline Bench Press - Dumbell','Floor Press - Barbell','Incline Bench Press - Barbell','Incline Bench Press - Dumbell','Incline Fly - Dumbell','Machine Fly','Machine Press','Push-Up'],
+  'Back':['Cable Row','Deadlift','Deadlift - Romanian','Dumbell Row - One Arm','Face Pulls','Good Morning - Barbell','Hyperextensions','Machine Row','Meadows Row','Pendlay Row','Rack Pull','Reverse Fly - Dumbell','Reverse Fly - Machine','Row - Barbell','Seal Row','T-Bar Row'],
+  'Lats':['Cable Pulldown - Wide Grip','Chin-Up','Diverging Lat Pulldown','Lat Pulldown - Close Grip','Lat Pulldown - Underhand','Machine Assisted Pull-ups','Pull-ups','Straight Arm Pulldown - Cable'],
+  'Delts (Front)':['Arnold Press','Cable Front Raise','Dumbell Raise - Standing Front','Military Press - Barbell','Overhead Press - Dumbbell (Seated)','Overhead Press - Machine','Plate Raise'],
+  'Delts (Middle)':['Cable Lateral Raise - Hip Height','Cable Raise - Floor Height','Dumbell Raise - Standing Lateral','Machine Lateral Raise','Seated Lateral Raise - Dumbell','Upright Row - Barbell','Upright Row - Dumbell'],
+  'Delts (Rear)':['Band Pull-Apart','Dumbell Raise - Seated (Decline)','Face Pulls','Rear Delt Machine Fly','Reverse Fly - Cable','Rotator Cuff - Cable','Rotator Cuff - Flat Bench'],
+  'Biceps':['Curls - Barbell','Curls - Cable','Curls - Concentration','Curls - Dumbell (Decline)','Curls - Dumbell (Incline)','Curls - Dumbell (Standing)','Curls - EZ Bar (Standing)','Curls - Machine','Curls - Preacher (EZ Bar)','Curls - Preacher (Flat Bar)','Curls - Preacher (Machine)','Hammer Curls (Preacher)','Hammer Curls (Standing)','Reverse Curls - Barbell','Spider Curls'],
+  'Triceps':['Close-Grip Bench Press','Extension - Cable (One-Arm)','Kickbacks - Dumbell','Overhead Extension - Barbell','Overhead Extension - Cable (Two-Hand Bar)','Overhead Extension - Dumbell','Skull Crushers - Barbell','Skull Crushers - Dumbell','Tricep Dips','Tricep Pushdown - Cable (Rope)','Tricep Pushdown - Cable (Two-Hand Bar)'],
+  'Forearms / Grip':['Curl - Dumbell','Dead Hang','Farmers Carry','Plate Pinch','Reverse Curl - Dumbell','Wrist Curl - Barbell','Wrist Curl - Dumbell'],
+  'Abdominals':['Ab Wheel Rollout','Bicycle Crunch','Cable Crunch','Crunch','Decline Crunch','Hanging Leg Raise','Leg Raise - Lying','Oblique Crunch','Plank','Russian Twist','Side Plank','Sit-Up','Wood Chop - Cable'],
+  'Quads':['Box Squat','Bulgarian Split Squats','Front Squat - Barbell','Hack Squat - Machine','Leg Extensions','Leg Press','Lunges','Pistol Squats','Sissy Squats','Squats','Step-Ups'],
+  'Hamstrings':['Bulgarian Split Squats','Good Morning - Barbell','Leg Curl - Lying','Leg Curl - Seated','Leg Curl - Standing','Leg Curls','Nordic Curls','RDL','Stiff-Leg Deadlift','Sumo Deadlift'],
+  'Glutes':['Bulgarian Split Squats','Cable Kickback','Glute Bridge','Hip Abductors','Hip Adductors','Hip Thrust - Barbell','Hip Thrust - Machine','Lunges','Squats'],
+  'Calves':['Calf Raises','Calf Raises - Donkey','Calf Raises - Leg Press','Calf Raises - Seated','Calf Raises - Standing Machine','Tib Raises'],
+  'Hips':['Cable Hip Flexion','Clamshells','Hip Abductors','Hip Adductors','Lying Hip Abduction']
 };
 
 const CARDIO_ACTIVITIES = ['Running','Walking','Cycling','Rowing','Elliptical','Swimming','Jump Rope','Stair Climber','Hiking','HIIT','Skiing','Other'];
@@ -196,10 +206,10 @@ const CARDIO_ACTIVITIES = ['Running','Walking','Cycling','Rowing','Elliptical','
 let currentUser = null;
 let state = {
   view:'log',logStep:'workout',
-  selectedMuscle:null,selectedExercise:null,
+  selectedMuscle:null,selectedExercise:null,selectedGroup:null,
   setType:'working',weight:45,reps:10,weightInc:5,repsInc:1,
   pendingSets:[],_currentSession:null,
-  sessions:[],prs:{},favorites:[],
+  sessions:[],prs:{},favorites:[],customExercises:[],
   historyTab:'sessions',
   weightView:'list', weightPeriod:'1m',
   nutritionView:'log', nutritionPeriod:'1m',
@@ -247,18 +257,18 @@ async function loadUserData(){
   if(!currentUser) return;
   const userId = currentUser.id;
   try {
-    const [s,p,f,mf,w,mg,ef] = await Promise.all([
+    const [s,p,f,mf,w,mg,ef,ce] = await Promise.all([
       sb.from('sessions').select('*').eq('user_id',userId).order('date'),
       sb.from('personal_records').select('*').eq('user_id',userId),
       sb.from('food_log').select('*').eq('user_id',userId).order('ts'),
       sb.from('meal_favorites').select('*').eq('user_id',userId),
       sb.from('weight_log').select('*').eq('user_id',userId).order('date'),
       sb.from('macro_goals').select('*').eq('user_id',userId).maybeSingle(),
-      sb.from('exercise_favorites').select('*').eq('user_id',userId)
+      sb.from('exercise_favorites').select('*').eq('user_id',userId),
+      sb.from('custom_exercises').select('*').eq('user_id',userId)
     ]);
 
-    // Surface any RLS or network errors visibly
-    const errs = [s,p,f,mf,w,mg,ef].map(r=>r.error).filter(Boolean);
+    const errs = [s,p,f,mf,w,mg,ef,ce].map(r=>r.error).filter(Boolean);
     if(errs.length){
       const msg = errs[0].message || errs[0].code || 'Unknown error';
       toast('DB error: '+msg,'var(--red)');
@@ -273,6 +283,7 @@ async function loadUserData(){
     state.weightLog     = w.data  || [];
     state.macroGoals    = mg.data || {calories:2500,protein:180,carbs:250,fat:80};
     state.favorites     = (ef.data|| []).map(r=>r.exercise);
+    state.customExercises = ce.data || [];
     console.log('Loaded — sessions:',state.sessions.length,'prs:',Object.keys(state.prs).length);
   } catch(err){
     console.error('loadUserData exception:',err);
@@ -427,6 +438,14 @@ async function dbToggleExFav(exercise){
   else await sb.from('exercise_favorites').insert({user_id:currentUser.id,exercise});
 }
 
+async function dbAddCustomExercise(muscle, name, id){
+  await sb.from('custom_exercises').upsert({id, user_id:currentUser.id, muscle, name});
+}
+
+async function dbDeleteCustomExercise(id){
+  await sb.from('custom_exercises').delete().eq('id',id).eq('user_id',currentUser.id);
+}
+
 // ─── UTILS ───────────────────────────────────────────────────────────────────
 const uid=()=>(typeof crypto!=='undefined'&&crypto.randomUUID)?crypto.randomUUID():Math.random().toString(36).slice(2,9);
 function fmtDate(d){ return new Date(d).toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric'}); }
@@ -480,6 +499,7 @@ function renderNav(){
 // ── LOG ───────────────────────────────────────────────────────────────────────
 function renderLog(){
   if(state.logStep==='workout')     return renderWorkoutScreen();
+  if(state.logStep==='muscle')      return renderGroupMuscleSelect();
   if(state.logStep==='exercise')    return renderExerciseSelect();
   if(state.logStep==='sets')        return renderSets();
   if(state.logStep==='cardio-log')  return renderCardioLog();
@@ -494,7 +514,7 @@ function renderWorkoutScreen(){
     ${hasSets?`<div style="background:var(--accent-dim);border:1px solid var(--accent);border-radius:var(--radius-sm);padding:10px 14px;font-size:13px;color:var(--accent);font-weight:700">↩ Resuming ${fmtDate(state._currentSession.date)} — ${state._currentSession.exercises.length} exercise${state._currentSession.exercises.length!==1?'s':''} logged. Add more or finish.</div>`:''}
     <div>
       <div class="card-title" style="margin-bottom:10px">Strength Training</div>
-      <div class="muscle-grid">${Object.keys(EXERCISES).map(m=>`<button class="muscle-btn" data-muscle="${m}">${m}</button>`).join('')}</div>
+      <div class="muscle-grid">${Object.keys(GROUPS).map(g=>`<button class="muscle-btn" data-group="${g}">${g}</button>`).join('')}</div>
     </div>
     <div>
       <div class="card-title" style="margin-bottom:10px">Cardio</div>
@@ -503,14 +523,42 @@ function renderWorkoutScreen(){
     ${hasSets?`<button class="btn btn-green btn-full" id="finish-from-workout">✓ Finish & Save</button>`:''}`;
 }
 
-function renderExerciseSelect(){
-  let list=EXERCISES[state.selectedMuscle]||[];
-  if(state.favFilter) list=list.filter(e=>state.favorites.includes(e));
-  if(state.searchQ) list=list.filter(e=>e.toLowerCase().includes(state.searchQ.toLowerCase()));
+function renderGroupMuscleSelect(){
+  const muscles=GROUPS[state.selectedGroup]||[];
   return `
-    <div style="display:flex;align-items:center;gap:10px"><button class="btn btn-outline btn-sm" id="back-workout">← Back</button><div><div class="page-title" style="font-size:18px">${state.selectedMuscle}</div></div></div>
+    <div style="display:flex;align-items:center;gap:10px">
+      <button class="btn btn-outline btn-sm" id="back-workout">← Back</button>
+      <div class="page-title" style="font-size:20px">${state.selectedGroup}</div>
+    </div>
+    <div class="card"><div class="card-title">Select Muscle</div>
+      <div class="muscle-grid">${muscles.map(m=>`<button class="muscle-btn" data-muscle="${m}">${m}</button>`).join('')}</div>
+    </div>`;
+}
+
+function renderExerciseSelect(){
+  const muscle=state.selectedMuscle;
+  const multiMuscle = state.selectedGroup && (GROUPS[state.selectedGroup]||[]).length > 1;
+  let standard=EXERCISES[muscle]||[];
+  const customs=state.customExercises.filter(e=>e.muscle===muscle);
+  if(state.favFilter) standard=standard.filter(e=>state.favorites.includes(e));
+  if(state.searchQ){
+    standard=standard.filter(e=>e.toLowerCase().includes(state.searchQ.toLowerCase()));
+  }
+  const filteredCustoms=state.searchQ?customs.filter(e=>e.name.toLowerCase().includes(state.searchQ.toLowerCase())):customs;
+  const hasResults=standard.length||filteredCustoms.length;
+  return `
+    <div style="display:flex;align-items:center;gap:10px">
+      <button class="btn btn-outline btn-sm" id="${multiMuscle?'back-muscle':'back-workout'}">← Back</button>
+      <div><div class="page-title" style="font-size:18px">${muscle}</div></div>
+    </div>
     <div class="filter-row"><input type="text" placeholder="Search exercises…" id="ex-search" value="${state.searchQ}" style="font-size:14px;padding:9px 12px"><button class="btn btn-sm ${state.favFilter?'btn-amber':'btn-outline'}" id="fav-filter">★ Favs</button></div>
-    <div class="exercise-list">${list.length?list.map(e=>`<div class="exercise-item ${state.favorites.includes(e)?'fav':''}" data-exercise="${e}"><span class="exercise-name">${e}</span><span class="fav-star" data-fav="${e}">★</span></div>`).join(''):`<div class="empty">No exercises found.</div>`}</div>`;
+    <div class="exercise-list">
+      ${hasResults?`
+        ${standard.map(e=>`<div class="exercise-item ${state.favorites.includes(e)?'fav':''}" data-exercise="${e}"><span class="exercise-name">${e}</span><span class="fav-star" data-fav="${e}">★</span></div>`).join('')}
+        ${filteredCustoms.map(e=>`<div class="exercise-item" data-exercise="${e.name}"><span class="exercise-name">${e.name}</span><span style="font-size:10px;color:var(--accent);background:var(--accent-dim);padding:2px 6px;border-radius:10px;margin-right:4px;flex-shrink:0">custom</span><button class="set-del" data-del-custom="${e.id}">✕</button></div>`).join('')}
+      `:`<div class="empty">No exercises found.</div>`}
+    </div>
+    <button class="btn btn-outline btn-full" id="add-custom-btn" style="margin-top:4px">＋ Add Exercise to ${muscle}</button>`;
 }
 
 function renderSets(){
@@ -888,13 +936,33 @@ function attachEvents(){
   const on=(id,ev,fn)=>{ const e=document.getElementById(id); if(e) e.addEventListener(ev,fn); };
 
   document.querySelectorAll('[data-nav]').forEach(b=>b.addEventListener('click',()=>{ state.view=b.dataset.nav; render(); }));
+
+  // Group → direct to exercise (single muscle) or muscle select (multi)
+  document.querySelectorAll('[data-group]').forEach(b=>b.addEventListener('click',()=>{
+    const g=b.dataset.group;
+    state.selectedGroup=g;
+    const muscles=GROUPS[g]||[];
+    if(muscles.length===1){ state.selectedMuscle=muscles[0]; state.logStep='exercise'; }
+    else state.logStep='muscle';
+    state.searchQ=''; render();
+  }));
+
   document.querySelectorAll('[data-muscle]').forEach(b=>b.addEventListener('click',()=>{ state.selectedMuscle=b.dataset.muscle; state.searchQ=''; state.logStep='exercise'; render(); }));
   document.querySelectorAll('[data-exercise]').forEach(b=>b.addEventListener('click',e=>{ if(e.target.closest('[data-fav]')) return; state.selectedExercise=b.dataset.exercise; state.pendingSets=[]; state.logStep='sets'; render(); }));
 
   document.querySelectorAll('[data-fav]').forEach(b=>b.addEventListener('click',async e=>{ e.stopPropagation(); const ex=b.dataset.fav; const idx=state.favorites.indexOf(ex); if(idx>=0) state.favorites.splice(idx,1); else state.favorites.push(ex); render(); dbToggleExFav(ex); }));
 
   el('back-workout',()=>{ state.logStep='workout'; state.searchQ=''; render(); });
+  el('back-muscle', ()=>{ state.logStep='muscle';  state.searchQ=''; render(); });
   el('back-exercise',()=>{ state.logStep='exercise'; render(); });
+  el('add-custom-btn', showAddExerciseModal);
+  document.querySelectorAll('[data-del-custom]').forEach(b=>b.addEventListener('click',async e=>{
+    e.stopPropagation();
+    const id=b.dataset.delCustom;
+    state.customExercises=state.customExercises.filter(e=>e.id!==id);
+    render(); dbDeleteCustomExercise(id);
+  }));
+
   on('ex-search','input',e=>{ state.searchQ=e.target.value; render(); });
   el('fav-filter',()=>{ state.favFilter=!state.favFilter; render(); });
 
@@ -1353,6 +1421,36 @@ function showPRModal(exercise){
     </div>`;
   document.getElementById('modal-cancel').addEventListener('click',closeModal);
   document.getElementById('modal-overlay').addEventListener('click',e=>{if(e.target===e.currentTarget)closeModal();});
+}
+
+function showAddExerciseModal(){
+  const muscle=state.selectedMuscle;
+  document.getElementById('modal-root').innerHTML=`
+    <div class="modal-overlay" id="modal-overlay">
+      <div class="modal">
+        <div class="modal-title">Add Exercise</div>
+        <div style="font-size:13px;color:var(--text-muted);margin-bottom:4px">Adding to: <strong style="color:var(--text)">${muscle}</strong></div>
+        <div class="field"><label>Exercise Name</label><input type="text" id="custom-ex-name" placeholder="e.g. Reverse Pec Deck" autocomplete="off"></div>
+        <div class="btn-grid">
+          <button class="btn btn-outline" id="modal-cancel">Cancel</button>
+          <button class="btn btn-primary" id="save-custom-btn">Add</button>
+        </div>
+      </div>
+    </div>`;
+  document.getElementById('modal-cancel').addEventListener('click',closeModal);
+  document.getElementById('modal-overlay').addEventListener('click',e=>{ if(e.target===e.currentTarget) closeModal(); });
+  const input=document.getElementById('custom-ex-name');
+  input.focus();
+  document.getElementById('save-custom-btn').addEventListener('click',async()=>{
+    const name=input.value.trim();
+    if(!name){ toast('Enter an exercise name','var(--red)'); return; }
+    const allNames=[...(EXERCISES[muscle]||[]),...state.customExercises.filter(e=>e.muscle===muscle).map(e=>e.name)];
+    if(allNames.some(n=>n.toLowerCase()===name.toLowerCase())){ toast('Exercise already exists','var(--red)'); return; }
+    const entry={id:uid(),muscle,name,user_id:currentUser.id};
+    state.customExercises.push(entry);
+    closeModal(); render();
+    dbAddCustomExercise(muscle,name,entry.id);
+  });
 }
 
 function closeModal(){ document.getElementById('modal-root').innerHTML=''; }
