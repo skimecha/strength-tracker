@@ -177,7 +177,7 @@ const sb = createClient(SUPABASE_URL, SUPABASE_KEY, {
 function isDemo(){ return currentUser?.email === DEMO_EMAIL; }
 function demoBlock(){ toast('Sign up to track your own data →','var(--accent)'); }
 
-const APP_VERSION = '2.9.2';
+const APP_VERSION = '2.9.3';
 const DEMO_EMAIL    = 'demo@lockinstrength.com';
 const DEMO_PASSWORD = 'shJ*WwBy9OYj54&P';
 
@@ -221,7 +221,7 @@ let state = {
   sessions:[],prs:{},favorites:[],customExercises:[],
   historyTab:'sessions',
   weightView:'list', weightPeriod:'1m',
-  nutritionView:'log', nutritionPeriod:'1m',
+  nutritionView:'log', nutritionPeriod:'1m', calorieDisplay:'total',
   timer:{remaining:0,total:0,interval:null,running:false},
   favFilter:false,searchQ:'',
   macroGoals:{calories:2500,protein:180,carbs:250,fat:80},
@@ -805,7 +805,7 @@ function renderNutrition(){
   const period=state.nutritionPeriod;
   return `
     <div class="page-header"><div><div class="page-title">Nutrition</div><div class="subtitle">${fmtDate(Date.now())}</div></div><div style="display:flex;align-items:center;gap:8px"><div style="font-size:10px;color:var(--text-muted);font-weight:600">v${APP_VERSION}</div><button class="btn btn-outline btn-sm" id="edit-goals-btn">Goals</button></div></div>
-    <div class="card"><div class="card-title">Today's Totals</div><div style="text-align:center;margin-bottom:14px"><div style="font-size:42px;font-weight:800;color:var(--text)">${totals.calories}</div><div style="font-size:13px;color:var(--text-muted)">of ${g.calories} kcal goal</div></div>${macroBar('Protein','var(--accent)',totals.protein,g.protein,'g')}<div style="margin-top:10px">${macroBar('Carbs','var(--green)',totals.carbs,g.carbs,'g')}</div><div style="margin-top:10px">${macroBar('Fat','var(--amber)',totals.fat,g.fat,'g')}</div></div>
+    <div class="card"><div class="card-title">Today's Totals</div><div style="text-align:center;margin-bottom:14px;cursor:pointer" onclick="state.calorieDisplay=state.calorieDisplay==='remaining'?'total':'remaining';render()">${(()=>{const rem=g.calories-totals.calories;if(state.calorieDisplay==='remaining'){return rem>=0?`<div style="font-size:42px;font-weight:800;color:var(--text)">${rem}</div><div style="font-size:13px;color:var(--text-muted)">remaining of ${g.calories} kcal goal</div>`:`<div style="font-size:42px;font-weight:800;color:var(--amber)">${Math.abs(rem)}</div><div style="font-size:13px;color:var(--amber)">over your ${g.calories} kcal goal</div>`;}return `<div style="font-size:42px;font-weight:800;color:var(--text)">${totals.calories}</div><div style="font-size:13px;color:var(--text-muted)">of ${g.calories} kcal goal</div>`;})()}<div style="font-size:10px;color:var(--text-muted);margin-top:4px;opacity:.7">tap to ${state.calorieDisplay==='remaining'?'show total':'show remaining'}</div></div>${macroBar('Protein','var(--accent)',totals.protein,g.protein,'g')}<div style="margin-top:10px">${macroBar('Carbs','var(--green)',totals.carbs,g.carbs,'g')}</div><div style="margin-top:10px">${macroBar('Fat','var(--amber)',totals.fat,g.fat,'g')}</div></div>
     <div class="toggle-group">
       <div class="toggle-opt ${view==='log'?'active':''}" onclick="state.nutritionView='log';render()">Log</div>
       <div class="toggle-opt ${view==='chart'?'active':''}" onclick="state.nutritionView='chart';render()">Chart</div>
