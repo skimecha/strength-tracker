@@ -44,4 +44,11 @@ create policy invite_redemptions_owner_read on public.invite_redemptions
 grant select, insert, update, delete on public.invite_codes       to authenticated;
 grant select                         on public.invite_redemptions to authenticated;
 
+-- The redeem-invite Edge Function runs as service_role — grant it access too
+-- (default privileges don't reliably cover it for SQL-editor-created tables).
+grant usage on schema public to service_role;
+grant select, insert, update, delete on public.invite_codes       to service_role;
+grant select, insert, update, delete on public.invite_redemptions to service_role;
+grant usage, select on all sequences in schema public to service_role;
+
 notify pgrst, 'reload schema';
