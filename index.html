@@ -176,10 +176,15 @@ const sb = createClient(SUPABASE_URL, SUPABASE_KEY, {
 
 function isDemo(){ return currentUser?.email === DEMO_EMAIL; }
 function demoBlock(){ toast('Sign up to track your own data →','var(--accent)'); }
+function isOwner(){ return currentUser?.id === OWNER_UID; }
 
-const APP_VERSION = '2.9.3';
+const APP_VERSION = '2.10.0';
 const DEMO_EMAIL    = 'demo@lockinstrength.com';
 const DEMO_PASSWORD = 'shJ*WwBy9OYj54&P';
+const OWNER_UID     = '031a65ed-f52d-4a67-b271-47778e920c22';
+// Invite code from the URL (?invite=CODE) — drives the invite-only signup flow.
+let pendingInvite = new URLSearchParams(location.search).get('invite');
+function clearInviteParam(){ pendingInvite=null; try{ history.replaceState({},'',location.pathname); }catch(e){} }
 
 // ─── GROUPS & EXERCISES ───────────────────────────────────────────────────────
 const GROUPS = {
@@ -245,7 +250,7 @@ async function initAuth(){
   showLoading();
   const { data:{ session } } = await sb.auth.getSession();
   if(session){ currentUser=session.user; await loadUserData(); showApp(); }
-  else showAuth('login');
+  else showAuth(pendingInvite ? 'invite' : 'login');
 
   sb.auth.onAuthStateChange(async(event,session)=>{
     if(event==='SIGNED_IN'&&session){ currentUser=session.user; await loadUserData(); showApp(); }
@@ -315,18 +320,16 @@ function renderAuth(view){
     <div class="auth-divider">or</div>
     <button class="btn btn-outline btn-full" id="btn-demo" style="font-size:14px">👁 Try Demo — no sign up needed</button>
     <button class="auth-link" id="link-forgot">Forgot password?</button>
-    <button class="auth-link" id="link-register">Don't have an account? Create one</button>`;
+    <div style="text-align:center;margin-top:8px;font-size:12px;color:var(--text-muted)">Lock In is invite-only — got a code? Use your invite link.</div>`;
 
-  else if(view==='register') card.innerHTML=`
-    <div class="auth-title">Create Account</div>
-    <div class="auth-sub">Start tracking your progress</div>
+  else if(view==='invite') card.innerHTML=`
+    <div style="text-align:center;font-size:30px;margin-bottom:2px">🔒</div>
+    <div class="auth-title" style="text-align:center">You're Invited</div>
+    <div class="auth-sub" style="text-align:center">Someone handed you the key to Lock In: Strength. Claim your spot.</div>
     <div id="auth-msg" class="auth-msg"></div>
     <div class="field"><label>Email</label><input type="email" id="a-email" placeholder="you@example.com" autocomplete="email"></div>
-    <div class="field"><label>Password</label><input type="password" id="a-pass" placeholder="Password (min 8 chars)" autocomplete="new-password"></div>
-    <div class="field"><label>Confirm Password</label><input type="password" id="a-pass2" placeholder="Confirm password" autocomplete="new-password"></div>
-    <button class="btn btn-primary" id="btn-register">Create Account</button>
-    <div class="auth-divider">or</div>
-    <button class="btn-google" id="btn-google"><svg width="18" height="18" viewBox="0 0 48 48"><path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/><path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/><path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/><path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/></svg>Continue with Google</button>
+    <div class="field"><label>Create Password</label><input type="password" id="a-pass" placeholder="At least 8 characters" autocomplete="new-password"></div>
+    <button class="btn btn-primary" id="btn-join">Join Lock In</button>
     <button class="auth-link" id="link-login">Already have an account? Sign in</button>`;
 
   else if(view==='forgot') card.innerHTML=`
@@ -357,7 +360,7 @@ function authMsg(msg,type='error'){
 function attachAuthEvents(view){
   const el=(id,fn)=>{ const e=document.getElementById(id); if(e) e.addEventListener('click',fn); };
   const on=(id,ev,fn)=>{ const e=document.getElementById(id); if(e) e.addEventListener(ev,fn); };
-  on('a-pass','keydown',e=>{ if(e.key==='Enter') document.getElementById('btn-login')?.click()||document.getElementById('btn-register')?.click(); });
+  on('a-pass','keydown',e=>{ if(e.key==='Enter') document.getElementById('btn-login')?.click()||document.getElementById('btn-join')?.click(); });
 
   if(view==='login'){
     el('btn-login', async()=>{
@@ -375,20 +378,24 @@ function attachAuthEvents(view){
     });
     el('btn-google', handleGoogleAuth);
     el('link-forgot',()=>renderAuth('forgot'));
-    el('link-register',()=>renderAuth('register'));
-  } else if(view==='register'){
-    el('btn-register', async()=>{
+  } else if(view==='invite'){
+    el('btn-join', async()=>{
       const email=document.getElementById('a-email').value.trim();
       const pass=document.getElementById('a-pass').value;
-      const pass2=document.getElementById('a-pass2').value;
-      if(!email||!pass){ authMsg('Please enter email and password'); return; }
+      if(!email||!pass){ authMsg('Enter your email and a password'); return; }
       if(pass.length<8){ authMsg('Password must be at least 8 characters'); return; }
-      if(pass!==pass2){ authMsg('Passwords do not match'); return; }
-      const {error}=await sb.auth.signUp({email,password:pass});
-      if(error) authMsg(error.message);
-      else authMsg('Check your email to confirm your account','success');
+      const btn=document.getElementById('btn-join'); btn.disabled=true; btn.textContent='Joining…';
+      try{
+        await redeemInvite(pendingInvite, email, pass);
+        authMsg('Welcome to Lock In! Signing you in…','success');
+        const {error}=await sb.auth.signInWithPassword({email,password:pass});
+        if(error){ authMsg('Account created — please sign in.'); renderAuth('login'); }
+        else clearInviteParam();  // onAuthStateChange takes it from here
+      }catch(e){
+        authMsg(e.message||'Could not join — check your invite link.');
+        btn.disabled=false; btn.textContent='Join Lock In';
+      }
     });
-    el('btn-google', handleGoogleAuth);
     el('link-login',()=>renderAuth('login'));
   } else if(view==='forgot'){
     el('btn-forgot', async()=>{
@@ -414,6 +421,18 @@ function attachAuthEvents(view){
 
 async function handleGoogleAuth(){
   await sb.auth.signInWithOAuth({provider:'google',options:{redirectTo:'https://lockinstrength.com'}});
+}
+
+// Redeem an invite code → creates the account via the redeem-invite Edge Function.
+async function redeemInvite(code, email, password){
+  const res = await fetch(`${SUPABASE_URL}/functions/v1/redeem-invite`,{
+    method:'POST',
+    headers:{ 'Content-Type':'application/json', 'apikey':SUPABASE_KEY, 'Authorization':`Bearer ${SUPABASE_KEY}` },
+    body: JSON.stringify({ code, email, password })
+  });
+  let data={}; try{ data=await res.json(); }catch(e){}
+  if(!res.ok || data.error) throw new Error(data.error || 'Could not create your account.');
+  return data;
 }
 
 async function handleLogout(){
@@ -448,6 +467,19 @@ async function dbAddWeight(entry){
 async function dbDeleteWeight(id){ await sb.from('weight_log').delete().eq('id',id).eq('user_id',currentUser.id); }
 async function dbSaveMacros(){
   await sb.from('macro_goals').upsert({user_id:currentUser.id,...state.macroGoals},{onConflict:'user_id'});
+}
+// ── Invites (owner only; RLS enforces it) ──
+function genInviteCode(){ const c='ABCDEFGHJKMNPQRSTUVWXYZ23456789'; let s=''; for(let i=0;i<6;i++) s+=c[Math.floor(Math.random()*c.length)]; return 'LOCKIN-'+s; }
+async function dbCreateInviteCode(label, maxUses){
+  const code=genInviteCode();
+  const {error}=await sb.from('invite_codes').insert({code, label:label||null, max_uses:maxUses||1, used_count:0, created_by:currentUser.id});
+  if(error){ toast('Could not create code: '+error.message,'var(--red)'); return null; }
+  return code;
+}
+async function dbLoadInviteCodes(){
+  const {data,error}=await sb.from('invite_codes').select('*').order('created_at',{ascending:false});
+  if(error){ toast('Could not load invites','var(--red)'); return []; }
+  return data||[];
 }
 async function dbToggleExFav(exercise){
   const isFav=state.favorites.includes(exercise);
@@ -493,7 +525,7 @@ function safeRender(fn, name){
 
 function render(){
   document.getElementById('demo-banner-wrap').innerHTML = isDemo()
-    ? `<div class="demo-banner"><span class="demo-banner-text">👁 Demo mode — you're viewing sample data</span><button class="demo-banner-btn" onclick="sb.auth.signOut()">Sign Up Free</button></div>`
+    ? `<div class="demo-banner"><span class="demo-banner-text">👁 Demo mode — you're viewing sample data</span><button class="demo-banner-btn" onclick="sb.auth.signOut()">Exit Demo</button></div>`
     : '';
   document.getElementById('nav-wrap').innerHTML=renderNav();
   document.getElementById('views-wrap').innerHTML=`
@@ -926,6 +958,12 @@ function renderMore(){
       <button class="btn btn-outline btn-full" id="update-password-btn">Update Password</button>
     </div>
 
+    ${isOwner()?`<div class="card">
+      <div class="card-title">Invites</div>
+      <div style="font-size:13px;color:var(--text-muted);margin-bottom:12px">Create invitation codes and QR codes to let new people join.</div>
+      <button class="btn btn-primary btn-full" id="manage-invites-btn">Manage Invites</button>
+    </div>`:''}
+
     <div class="card">
       <div class="card-title">Disclosures</div>
       <div style="display:flex;flex-direction:column;gap:10px">
@@ -1056,6 +1094,7 @@ function attachEvents(){
   el('export-csv',exportAllCSV);
   el('logout-btn',handleLogout);
   el('update-password-btn', ()=>{ if(isDemo()){ demoBlock(); return; } showUpdatePasswordModal(); });
+  el('manage-invites-btn', ()=>{ if(isOwner()) showInvitesModal(); });
   el('delete-account-btn',  ()=>{ if(isDemo()){ demoBlock(); return; } showDeleteAccountModal(); });
   el('show-privacy-btn', ()=>showPolicyModal('Privacy Policy', PRIVACY_POLICY));
   el('show-tos-btn',     ()=>showPolicyModal('Terms of Service', TERMS_OF_SERVICE));
@@ -1481,6 +1520,63 @@ function showAddExerciseModal(){
   });
 }
 
+function inviteLink(code){ return `${location.origin}/?invite=${code}`; }
+function inviteQR(code){ return `https://api.qrserver.com/v1/create-qr-code/?size=240x240&margin=10&data=${encodeURIComponent(inviteLink(code))}`; }
+function shareInvite(code){
+  const link=inviteLink(code);
+  const text=`You're invited to Lock In: Strength 🔒💪 — claim your spot: ${link}`;
+  if(navigator.share){ navigator.share({title:'Lock In: Strength', text, url:link}).catch(()=>{}); }
+  else navigator.clipboard.writeText(link).then(()=>toast('Link copied!'),()=>toast('Copy failed','var(--red)'));
+}
+async function showInvitesModal(highlightCode){
+  if(!isOwner()) return;
+  const codes=await dbLoadInviteCodes();
+  const hi=highlightCode ? codes.find(c=>c.code===highlightCode) : null;
+  document.getElementById('modal-root').innerHTML=`
+    <div class="modal-overlay" id="modal-overlay">
+      <div class="modal" style="max-height:88vh;overflow-y:auto">
+        <div class="modal-title">Invites</div>
+        ${hi?`
+          <div style="text-align:center;background:var(--surface2);border:1px solid var(--accent);border-radius:var(--radius-sm);padding:14px">
+            <img src="${inviteQR(hi.code)}" alt="Invite QR code" width="200" height="200" style="border-radius:8px;background:#fff;padding:8px;width:200px;height:200px">
+            <div style="font-family:monospace;font-weight:800;color:var(--text);margin-top:10px;font-size:15px">${hi.code}</div>
+            <div style="font-size:11px;color:var(--text-muted);word-break:break-all;margin-top:4px">${inviteLink(hi.code)}</div>
+            <div class="btn-grid" style="margin-top:12px">
+              <button class="btn btn-outline" data-copy="${hi.code}">Copy link</button>
+              <button class="btn btn-primary" data-share="${hi.code}">Share</button>
+            </div>
+          </div>`:''}
+        <div class="field"><label>Label (optional)</label><input type="text" id="inv-label" placeholder="e.g. gym buddy, street sticker"></div>
+        <div class="field"><label>Max uses</label><input type="number" id="inv-uses" value="1" min="1" inputmode="numeric"></div>
+        <button class="btn btn-primary btn-full" id="inv-generate">Generate Invite</button>
+        ${codes.length?`<div class="card-title" style="margin-top:8px">Your codes</div>
+          <div class="section-gap">${codes.map(c=>{ const used=c.used_count>=c.max_uses; return `
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:8px">
+              <div style="min-width:0">
+                <div style="font-family:monospace;font-size:13px;font-weight:700;color:${used?'var(--text-muted)':'var(--text)'}">${c.code}</div>
+                <div style="font-size:11px;color:var(--text-muted)">${c.label?c.label+' · ':''}${c.used_count}/${c.max_uses} used${used?' · spent':''}</div>
+              </div>
+              <div style="display:flex;gap:6px;flex-shrink:0">
+                <button class="btn btn-outline btn-xs" data-qr="${c.code}">QR</button>
+                <button class="btn btn-outline btn-xs" data-copy="${c.code}">Copy</button>
+              </div>
+            </div>`; }).join('<hr class="divider" style="margin:2px 0">')}</div>`:''}
+        <button class="btn btn-outline btn-full" id="modal-cancel" style="margin-top:8px">Close</button>
+      </div>
+    </div>`;
+  document.getElementById('modal-cancel').addEventListener('click',closeModal);
+  document.getElementById('modal-overlay').addEventListener('click',e=>{ if(e.target===e.currentTarget) closeModal(); });
+  document.getElementById('inv-generate').addEventListener('click',async()=>{
+    const label=document.getElementById('inv-label').value.trim();
+    const uses=Math.max(1,parseInt(document.getElementById('inv-uses').value)||1);
+    const btn=document.getElementById('inv-generate'); btn.disabled=true; btn.textContent='Generating…';
+    const code=await dbCreateInviteCode(label,uses);
+    if(code) showInvitesModal(code); else { btn.disabled=false; btn.textContent='Generate Invite'; }
+  });
+  document.querySelectorAll('[data-copy]').forEach(b=>b.addEventListener('click',()=>navigator.clipboard.writeText(inviteLink(b.dataset.copy)).then(()=>toast('Link copied!'),()=>toast('Copy failed','var(--red)'))));
+  document.querySelectorAll('[data-share]').forEach(b=>b.addEventListener('click',()=>shareInvite(b.dataset.share)));
+  document.querySelectorAll('[data-qr]').forEach(b=>b.addEventListener('click',()=>showInvitesModal(b.dataset.qr)));
+}
 function closeModal(){ document.getElementById('modal-root').innerHTML=''; }
 
 // ─── REST TIMER ───────────────────────────────────────────────────────────────
