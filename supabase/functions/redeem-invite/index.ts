@@ -50,7 +50,10 @@ Deno.serve(async (req) => {
       .select("*")
       .eq("code", code)
       .maybeSingle();
-    if (invErr) return json({ error: "Could not verify invite." }, 500);
+    if (invErr) {
+      console.error("invite_codes lookup failed:", invErr);
+      return json({ error: "Could not verify invite.", detail: invErr.message }, 500);
+    }
     if (!inv) return json({ error: "That invite code isn't valid." }, 403);
     if (inv.expires_at && new Date(inv.expires_at) < new Date()) {
       return json({ error: "This invite has expired." }, 403);
