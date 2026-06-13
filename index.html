@@ -19,6 +19,14 @@
   --red:#f87171;--red-dim:#3d1212;
   --radius:12px;--radius-sm:8px;
 }
+html.light{
+  --bg:#f4f6fb;--surface:#ffffff;--surface2:#eef1f7;--border:#d8dde9;
+  --text:#161922;--text-muted:#5b6478;
+  --accent:#2f6fe0;--accent-dim:#dde9fd;
+  --green:#1fa971;--green-dim:#d6f3e6;
+  --amber:#c9780a;--amber-dim:#fbe9c8;
+  --red:#dc4747;--red-dim:#fbdada;
+}
 html,body{height:100%;background:var(--bg);color:var(--text);font-family:'Segoe UI',system-ui,sans-serif;-webkit-tap-highlight-color:transparent}
 
 .demo-banner{background:var(--accent-dim);border-bottom:2px solid var(--accent);padding:8px 16px;display:flex;align-items:center;justify-content:space-between;gap:12px;flex-shrink:0}
@@ -174,11 +182,12 @@ const sb = createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true, storageKey: 'lockin-auth' }
 });
 
+function setTheme(t){ const light=(t==='light'); state.theme=t; localStorage.setItem('li_theme',t); document.documentElement.classList.toggle('light',light); const m=document.querySelector('meta[name="theme-color"]'); if(m) m.content=light?'#f4f6fb':'#0f1117'; }
 function isDemo(){ return currentUser?.email === DEMO_EMAIL; }
 function demoBlock(){ toast('Sign up to track your own data →','var(--accent)'); }
 function isOwner(){ return currentUser?.id === OWNER_UID; }
 
-const APP_VERSION = '2.11.0';
+const APP_VERSION = '2.11.1';
 const DEMO_EMAIL    = 'demo@lockinstrength.com';
 const DEMO_PASSWORD = '***REMOVED***';
 const OWNER_UID     = '031a65ed-f52d-4a67-b271-47778e920c22';
@@ -233,6 +242,7 @@ let state = {
   foodLog:[],mealFavorites:[],
   weightLog:[],
   weightUnit: localStorage.getItem('li_weight_unit') || 'lbs',
+  theme: localStorage.getItem('li_theme') || 'dark',
   cardio:{
     activity:null,
     stopwatch:{running:false,elapsed:0,interval:null},
@@ -966,6 +976,14 @@ function renderMore(){
       <button class="btn btn-outline btn-full" id="update-password-btn">Update Password</button>
     </div>
 
+    <div class="card">
+      <div class="card-title">Appearance</div>
+      <div class="toggle-group">
+        <div class="toggle-opt ${state.theme==='dark'?'active':''}" data-theme="dark">🌙 Dark</div>
+        <div class="toggle-opt ${state.theme==='light'?'active':''}" data-theme="light">☀️ Light</div>
+      </div>
+    </div>
+
     ${isOwner()?`<div class="card">
       <div class="card-title">Invites</div>
       <div style="font-size:13px;color:var(--text-muted);margin-bottom:12px">Create invitation codes and QR codes to let new people join.</div>
@@ -1103,6 +1121,7 @@ function attachEvents(){
   el('logout-btn',handleLogout);
   el('update-password-btn', ()=>{ if(isDemo()){ demoBlock(); return; } showUpdatePasswordModal(); });
   el('manage-invites-btn', ()=>{ if(isOwner()) showInvitesModal(); });
+  document.querySelectorAll('[data-theme]').forEach(b=>b.addEventListener('click',()=>{ setTheme(b.dataset.theme); render(); }));
   el('delete-account-btn',  ()=>{ if(isDemo()){ demoBlock(); return; } showDeleteAccountModal(); });
   el('show-privacy-btn', ()=>showPolicyModal('Privacy Policy', PRIVACY_POLICY));
   el('show-tos-btn',     ()=>showPolicyModal('Terms of Service', TERMS_OF_SERVICE));
@@ -1666,6 +1685,7 @@ function iconTrophy(){ return `<svg viewBox="0 0 24 24" fill="none" stroke="curr
 
 // ─── INIT ─────────────────────────────────────────────────────────────────────
 if('serviceWorker' in navigator) navigator.serviceWorker.register('./sw.js').catch(()=>{});
+setTheme(state.theme);
 initAuth();
 </script>
 </body>
