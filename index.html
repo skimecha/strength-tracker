@@ -178,7 +178,7 @@ function isDemo(){ return currentUser?.email === DEMO_EMAIL; }
 function demoBlock(){ toast('Sign up to track your own data →','var(--accent)'); }
 function isOwner(){ return currentUser?.id === OWNER_UID; }
 
-const APP_VERSION = '2.10.6';
+const APP_VERSION = '2.11.0';
 const DEMO_EMAIL    = 'demo@lockinstrength.com';
 const DEMO_PASSWORD = '***REMOVED***';
 const OWNER_UID     = '031a65ed-f52d-4a67-b271-47778e920c22';
@@ -456,6 +456,13 @@ async function dbAddFood(entry){
   return data;
 }
 async function dbDeleteFood(id){ await sb.from('food_log').delete().eq('id',id).eq('user_id',currentUser.id); }
+// Food search via the food-search Edge Function (USDA + Open Food Facts). Macros are per 100g.
+async function foodSearch(q){
+  const res=await fetch(`${SUPABASE_URL}/functions/v1/food-search`,{method:'POST',headers:{'Content-Type':'application/json','apikey':SUPABASE_KEY,'Authorization':`Bearer ${SUPABASE_KEY}`},body:JSON.stringify({q})});
+  if(!res.ok) throw new Error('search unavailable');
+  const data=await res.json();
+  return data.results||[];
+}
 async function dbAddMealFav(fav){
   const {data}=await sb.from('meal_favorites').upsert({id:fav.id,user_id:currentUser.id,name:fav.name,calories:fav.calories,protein:fav.protein,carbs:fav.carbs,fat:fav.fat}).select().single();
   return data;
@@ -497,6 +504,7 @@ async function dbDeleteCustomExercise(id){
 
 // ─── UTILS ───────────────────────────────────────────────────────────────────
 const uid=()=>(typeof crypto!=='undefined'&&crypto.randomUUID)?crypto.randomUUID():Math.random().toString(36).slice(2,9);
+const esc=s=>String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 function fmtDate(d){ return new Date(d).toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric'}); }
 function fmtDateShort(d){ return new Date(d).toLocaleDateString('en-US',{month:'short',day:'numeric'}); }
 function fmtTime(d){ return new Date(d).toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit'}); }
@@ -843,9 +851,9 @@ function renderNutrition(){
       <div class="toggle-opt ${view==='chart'?'active':''}" onclick="state.nutritionView='chart';render()">Chart</div>
     </div>
     ${view==='log'?`
-      ${state.mealFavorites.length?`<div class="card"><div class="card-title">Favorites — tap to log</div><div class="section-gap">${state.mealFavorites.map(f=>`<div style="display:flex;align-items:center;gap:10px"><div style="flex:1;min-width:0;cursor:pointer" data-log-fav="${f.id}"><div style="font-size:14px;font-weight:700;color:var(--text)">${f.name}</div><div style="font-size:12px;color:var(--text-muted);margin-top:1px">${f.calories} kcal · P:${f.protein}g C:${f.carbs}g F:${f.fat}g</div></div><button class="btn btn-outline btn-xs" data-log-fav="${f.id}" style="flex-shrink:0">+ Log</button><button class="fav-del" data-del-fav="${f.id}" title="Remove favorite">★</button></div>`).join('<hr class="divider" style="margin:2px 0">')}</div></div>`:''}
+      ${state.mealFavorites.length?`<div class="card"><div class="card-title">Favorites — tap to log</div><div class="section-gap">${state.mealFavorites.map(f=>`<div style="display:flex;align-items:center;gap:10px"><div style="flex:1;min-width:0;cursor:pointer" data-log-fav="${f.id}"><div style="font-size:14px;font-weight:700;color:var(--text)">${esc(f.name)}</div><div style="font-size:12px;color:var(--text-muted);margin-top:1px">${f.calories} kcal · P:${f.protein}g C:${f.carbs}g F:${f.fat}g</div></div><button class="btn btn-outline btn-xs" data-log-fav="${f.id}" style="flex-shrink:0">+ Log</button><button class="fav-del" data-del-fav="${f.id}" title="Remove favorite">★</button></div>`).join('<hr class="divider" style="margin:2px 0">')}</div></div>`:''}
       <button class="btn btn-primary" id="add-food-btn">+ Add Food / Meal</button>
-      ${todayEntries.length?`<div class="card"><div class="card-title">Today's Log</div><div class="section-gap">${[...todayEntries].reverse().map(e=>`<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:8px"><div style="flex:1;min-width:0"><div style="font-size:14px;font-weight:700;color:var(--text)">${e.name}</div><div style="font-size:12px;color:var(--text-muted);margin-top:2px">${fmtTime(e.ts)} · P:${e.protein}g C:${e.carbs}g F:${e.fat}g</div></div><div style="text-align:right;flex-shrink:0;display:flex;flex-direction:column;align-items:flex-end;gap:4px"><div style="font-size:16px;font-weight:800;color:var(--text)">${e.calories} kcal</div><div style="display:flex;gap:6px"><button class="btn btn-xs ${isMealFav(e)?'btn-amber':'btn-outline'}" data-fav-food="${e.id}" title="${isMealFav(e)?'Remove from favorites':'Save as favorite'}">★</button><button class="btn btn-xs btn-danger" data-del-food="${e.id}">✕</button></div></div></div>`).join('<hr class="divider" style="margin:2px 0">')}</div></div>`:''}
+      ${todayEntries.length?`<div class="card"><div class="card-title">Today's Log</div><div class="section-gap">${[...todayEntries].reverse().map(e=>`<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:8px"><div style="flex:1;min-width:0"><div style="font-size:14px;font-weight:700;color:var(--text)">${esc(e.name)}</div><div style="font-size:12px;color:var(--text-muted);margin-top:2px">${fmtTime(e.ts)} · P:${e.protein}g C:${e.carbs}g F:${e.fat}g</div></div><div style="text-align:right;flex-shrink:0;display:flex;flex-direction:column;align-items:flex-end;gap:4px"><div style="font-size:16px;font-weight:800;color:var(--text)">${e.calories} kcal</div><div style="display:flex;gap:6px"><button class="btn btn-xs ${isMealFav(e)?'btn-amber':'btn-outline'}" data-fav-food="${e.id}" title="${isMealFav(e)?'Remove from favorites':'Save as favorite'}">★</button><button class="btn btn-xs btn-danger" data-del-food="${e.id}">✕</button></div></div></div>`).join('<hr class="divider" style="margin:2px 0">')}</div></div>`:''}
       <div style="font-size:11px;color:var(--text-muted);text-align:center">Export all data from the History tab</div>
     `:`
       <div style="display:flex;gap:6px;overflow-x:auto;padding-bottom:2px;flex-shrink:0">
@@ -1210,13 +1218,54 @@ function showGoalsModal(){
 }
 
 function showAddFoodModal(){
-  document.getElementById('modal-root').innerHTML=`<div class="modal-overlay" id="modal-overlay"><div class="modal"><div class="modal-title">Add Food / Meal</div><div class="field"><label>Name</label><input type="text" id="f-name" placeholder="e.g. Chicken breast…"></div><div class="field"><label>Calories (kcal)</label><input type="number" id="f-cal" placeholder="0"></div><div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px"><div class="field"><label>Protein (g)</label><input type="number" id="f-pro" placeholder="0"></div><div class="field"><label>Carbs (g)</label><input type="number" id="f-carb" placeholder="0"></div><div class="field"><label>Fat (g)</label><input type="number" id="f-fat" placeholder="0"></div></div><div class="btn-grid"><button class="btn btn-outline" id="modal-cancel">Cancel</button><button class="btn btn-primary" id="modal-save-food">Add</button></div></div></div>`;
-  document.getElementById('modal-cancel').addEventListener('click',closeModal);
-  document.getElementById('modal-overlay').addEventListener('click',e=>{ if(e.target===e.currentTarget) closeModal(); });
-  document.getElementById('f-name').focus();
-  document.getElementById('modal-save-food').addEventListener('click',()=>{
-    const name=document.getElementById('f-name').value.trim(); if(!name){ toast('Enter a food name','var(--red)'); return; }
-    const entry={id:uid(),date:todayKey(),ts:Date.now(),name,calories:parseInt(document.getElementById('f-cal').value)||0,protein:parseFloat(document.getElementById('f-pro').value)||0,carbs:parseFloat(document.getElementById('f-carb').value)||0,fat:parseFloat(document.getElementById('f-fat').value)||0};
+  let results=[], sel=null, searchTimer=null;
+  document.getElementById('modal-root').innerHTML=`<div class="modal-overlay" id="modal-overlay"><div class="modal" style="max-height:88vh;overflow-y:auto">
+    <div class="modal-title">Add Food / Meal</div>
+    <div class="field"><label>Search foods</label><input type="text" id="f-search" placeholder="e.g. chicken breast, greek yogurt…" autocomplete="off"></div>
+    <div id="f-results"></div>
+    <div class="field"><label>Name</label><input type="text" id="f-name" placeholder="e.g. Chicken breast…"></div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px"><div class="field"><label>Amount (g)</label><input type="number" id="f-grams" placeholder="—" step="1"></div><div class="field"><label>Calories (kcal)</label><input type="number" id="f-cal" placeholder="0"></div></div>
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px"><div class="field"><label>Protein (g)</label><input type="number" id="f-pro" placeholder="0"></div><div class="field"><label>Carbs (g)</label><input type="number" id="f-carb" placeholder="0"></div><div class="field"><label>Fat (g)</label><input type="number" id="f-fat" placeholder="0"></div></div>
+    <div class="btn-grid"><button class="btn btn-outline" id="modal-cancel">Cancel</button><button class="btn btn-primary" id="modal-save-food">Add</button></div>
+  </div></div>`;
+  const $=id=>document.getElementById(id);
+  $('modal-cancel').addEventListener('click',closeModal);
+  $('modal-overlay').addEventListener('click',e=>{ if(e.target===e.currentTarget) closeModal(); });
+
+  // When a searched food (per-100g) is selected, the amount drives the macro fields.
+  const recompute=()=>{ if(!sel) return; const f=(parseFloat($('f-grams').value)||0)/100; $('f-cal').value=Math.round(sel.calories*f); $('f-pro').value=+(sel.protein*f).toFixed(1); $('f-carb').value=+(sel.carbs*f).toFixed(1); $('f-fat').value=+(sel.fat*f).toFixed(1); };
+
+  const renderResults=mode=>{
+    const box=$('f-results');
+    if(mode==='loading'){ box.innerHTML=`<div style="font-size:12px;color:var(--text-muted);padding:6px 2px">Searching…</div>`; return; }
+    if(mode==='error'){ box.innerHTML=`<div style="font-size:12px;color:var(--text-muted);padding:6px 2px">Search unavailable — enter macros manually below.</div>`; return; }
+    if(!results.length){ box.innerHTML=`<div style="font-size:12px;color:var(--text-muted);padding:6px 2px">No matches — enter manually below.</div>`; return; }
+    box.innerHTML=`<div style="max-height:190px;overflow-y:auto;border:1px solid var(--border);border-radius:var(--radius-sm);margin-bottom:6px">${results.map((x,i)=>`<div data-pick="${i}" style="padding:8px 10px;cursor:pointer;border-bottom:1px solid var(--border)"><div style="font-size:13px;font-weight:700;color:var(--text)">${esc(x.name)}${x.brand?` <span style="color:var(--text-muted);font-weight:500">· ${esc(x.brand)}</span>`:''}</div><div style="font-size:11px;color:var(--text-muted);margin-top:1px">${x.calories} kcal · P:${x.protein} C:${x.carbs} F:${x.fat} <span style="opacity:.6">per 100g · ${esc(x.source)}</span></div></div>`).join('')}</div>`;
+    box.querySelectorAll('[data-pick]').forEach(el=>el.addEventListener('click',()=>{
+      const x=results[+el.dataset.pick]; sel=x;
+      $('f-name').value=x.name+(x.brand?` (${x.brand})`:'');
+      $('f-grams').value=x.servingGrams>0?x.servingGrams:100;
+      recompute();
+      results=[]; box.innerHTML='';
+    }));
+  };
+
+  $('f-search').addEventListener('input',e=>{
+    const q=e.target.value.trim();
+    clearTimeout(searchTimer);
+    if(q.length<2){ results=[]; $('f-results').innerHTML=''; return; }
+    renderResults('loading');
+    searchTimer=setTimeout(async()=>{
+      try{ results=await foodSearch(q); renderResults(); }
+      catch(err){ results=[]; renderResults('error'); }
+    },350);
+  });
+  $('f-grams').addEventListener('input',recompute);
+  $('f-search').focus();
+
+  $('modal-save-food').addEventListener('click',()=>{
+    const name=$('f-name').value.trim(); if(!name){ toast('Enter a food name','var(--red)'); return; }
+    const entry={id:uid(),date:todayKey(),ts:Date.now(),name,calories:parseInt($('f-cal').value)||0,protein:parseFloat($('f-pro').value)||0,carbs:parseFloat($('f-carb').value)||0,fat:parseFloat($('f-fat').value)||0};
     state.foodLog.push(entry); closeModal(); render(); dbAddFood(entry);
   });
 }
