@@ -178,7 +178,7 @@ function isDemo(){ return currentUser?.email === DEMO_EMAIL; }
 function demoBlock(){ toast('Sign up to track your own data →','var(--accent)'); }
 function isOwner(){ return currentUser?.id === OWNER_UID; }
 
-const APP_VERSION = '2.10.5';
+const APP_VERSION = '2.10.6';
 const DEMO_EMAIL    = 'demo@lockinstrength.com';
 const DEMO_PASSWORD = '***REMOVED***';
 const OWNER_UID     = '031a65ed-f52d-4a67-b271-47778e920c22';
@@ -197,7 +197,7 @@ const GROUPS = {
 };
 
 const EXERCISES = {
-  'Chest':['Bench Press - Barbell','Bench Press - Dumbell','Cable Fly','Chest Dip','Decline Bench Press - Barbell','Decline Bench Press - Dumbell','Floor Press - Barbell','Incline Bench Press - Barbell','Incline Bench Press - Dumbell','Incline Fly - Dumbell','Machine Fly','Machine Press','Push-Up'],
+  'Chest':['Bench Press - Barbell','Bench Press - Dumbell','Cable Fly','Chest Dip','Floor Press - Barbell','Incline Bench Press - Barbell','Incline Bench Press - Dumbell','Incline Fly - Dumbell','Machine Fly','Machine Press','Push-Up'],
   'Back':['Cable Row','Deadlift','Deadlift - Romanian','Dumbell Row - One Arm','Face Pulls','Good Morning - Barbell','Hyperextensions','Machine Row','Meadows Row','Pendlay Row','Rack Pull','Reverse Fly - Dumbell','Reverse Fly - Machine','Row - Barbell','Seal Row','T-Bar Row'],
   'Lats':['Cable Pulldown - Wide Grip','Chin-Up','Diverging Lat Pulldown','Lat Pulldown - Close Grip','Lat Pulldown - Underhand','Machine Assisted Pull-ups','Pull-ups','Straight Arm Pulldown - Cable'],
   'Delts (Front)':['Arnold Press','Cable Front Raise','Dumbell Raise - Standing Front','Military Press - Barbell','Overhead Press - Dumbbell (Seated)','Overhead Press - Machine','Plate Raise'],
