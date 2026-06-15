@@ -29,9 +29,6 @@ html.light{
 }
 html,body{height:100%;background:var(--bg);color:var(--text);font-family:'Segoe UI',system-ui,sans-serif;-webkit-tap-highlight-color:transparent}
 
-.demo-banner{background:var(--accent-dim);border-bottom:2px solid var(--accent);padding:8px 16px;display:flex;align-items:center;justify-content:space-between;gap:12px;flex-shrink:0}
-.demo-banner-text{font-size:12px;font-weight:700;color:var(--accent)}
-.demo-banner-btn{background:var(--accent);color:#fff;border:none;border-radius:20px;padding:5px 14px;font-size:12px;font-weight:800;cursor:pointer;white-space:nowrap;flex-shrink:0}
 /* ── LOADING ── */
 #screen-loading{position:fixed;inset:0;background:var(--bg);display:flex;align-items:center;justify-content:center;z-index:999}
 .spinner{width:36px;height:36px;border:3px solid var(--border);border-top-color:var(--accent);border-radius:50%;animation:spin .8s linear infinite}
@@ -163,7 +160,6 @@ select:focus,input:focus{outline:none;border-color:var(--accent)}
 </div>
 
 <div id="screen-app">
-  <div id="demo-banner-wrap"></div>
   <div id="views-wrap" style="flex:1;display:flex;flex-direction:column;overflow:hidden"></div>
   <div id="nav-wrap"></div>
 </div>
@@ -183,13 +179,9 @@ const sb = createClient(SUPABASE_URL, SUPABASE_KEY, {
 });
 
 function setTheme(t){ const light=(t==='light'); state.theme=t; localStorage.setItem('li_theme',t); document.documentElement.classList.toggle('light',light); const m=document.querySelector('meta[name="theme-color"]'); if(m) m.content=light?'#f4f6fb':'#0f1117'; }
-function isDemo(){ return currentUser?.email === DEMO_EMAIL; }
-function demoBlock(){ toast('Sign up to track your own data →','var(--accent)'); }
 function isOwner(){ return currentUser?.id === OWNER_UID; }
 
-const APP_VERSION = '2.11.1';
-const DEMO_EMAIL    = 'demo@lockinstrength.com';
-const DEMO_PASSWORD = '***REMOVED***';
+const APP_VERSION = '2.11.2';
 const OWNER_UID     = '031a65ed-f52d-4a67-b271-47778e920c22';
 // Invite code from the URL (?invite=CODE) — drives the invite-only signup flow.
 let pendingInvite = new URLSearchParams(location.search).get('invite');
@@ -327,8 +319,6 @@ function renderAuth(view){
     <button class="btn btn-primary" id="btn-login">Sign In</button>
     <div class="auth-divider">or</div>
     <button class="btn-google" id="btn-google"><svg width="18" height="18" viewBox="0 0 48 48"><path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/><path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/><path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/><path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/></svg>Continue with Google</button>
-    <div class="auth-divider">or</div>
-    <button class="btn btn-outline btn-full" id="btn-demo" style="font-size:14px">👁 Try Demo — no sign up needed</button>
     <button class="auth-link" id="link-forgot">Forgot password?</button>
     <div style="text-align:center;margin-top:8px;font-size:12px;color:var(--text-muted)">Lock In is invite-only — got a code? Use your invite link.</div>`;
 
@@ -379,12 +369,6 @@ function attachAuthEvents(view){
       if(!email||!pass){ authMsg('Please enter email and password'); return; }
       const {error}=await sb.auth.signInWithPassword({email,password:pass});
       if(error) authMsg(error.message);
-    });
-    el('btn-demo', async()=>{
-      const btn=document.getElementById('btn-demo');
-      btn.textContent='Loading demo…'; btn.disabled=true;
-      const {error}=await sb.auth.signInWithPassword({email:DEMO_EMAIL,password:DEMO_PASSWORD});
-      if(error){ authMsg('Demo unavailable — try again shortly'); btn.textContent='👁 Try Demo — no sign up needed'; btn.disabled=false; }
     });
     el('btn-google', handleGoogleAuth);
     el('link-forgot',()=>renderAuth('forgot'));
@@ -542,9 +526,6 @@ function safeRender(fn, name){
 }
 
 function render(){
-  document.getElementById('demo-banner-wrap').innerHTML = isDemo()
-    ? `<div class="demo-banner"><span class="demo-banner-text">👁 Demo mode — you're viewing sample data</span><button class="demo-banner-btn" onclick="sb.auth.signOut()">Exit Demo</button></div>`
-    : '';
   document.getElementById('nav-wrap').innerHTML=renderNav();
   document.getElementById('views-wrap').innerHTML=`
     <div class="view ${state.view==='log'?'active':''}">${safeRender(renderLog,'Workout')}</div>
@@ -1051,7 +1032,6 @@ function attachEvents(){
   el('timer-cancel',()=>{ timerStop(false); updateTimerDOM(); });
 
   el('log-set',()=>{
-    if(isDemo()){ demoBlock(); return; }
     state.pendingSets.push({type:state.setType,weight:state.weight,reps:state.reps}); toast(`Set logged: ${state.weight}lbs × ${state.reps}`); render();
   });
   document.querySelectorAll('[data-del]').forEach(b=>b.addEventListener('click',()=>{ state.pendingSets.splice(parseInt(b.dataset.del),1); render(); }));
@@ -1060,18 +1040,15 @@ function attachEvents(){
   el('new-muscle',()=>{ commitExercise(); state.logStep='workout'; render(); });
 
   el('finish-workout',()=>{
-    if(isDemo()){ demoBlock(); return; }
     commitExercise();
     if(state._currentSession?.exercises?.length){ const sess=state._currentSession; state.sessions.push(sess); dbSaveSession(sess); toast('Workout saved! 💪'); }
     state._currentSession=null; state.pendingSets=[]; state.logStep='workout'; state.view='history'; render();
   });
   el('finish-from-workout',()=>{
-    if(isDemo()){ demoBlock(); return; }
     if(state._currentSession?.exercises?.length){ const sess=state._currentSession; state.sessions.push(sess); dbSaveSession(sess); toast('Workout saved! 💪'); }
     state._currentSession=null; state.pendingSets=[]; state.logStep='workout'; state.view='history'; render();
   });
   el('cancel-workout',()=>{
-    if(isDemo()){ state._currentSession=null; state.pendingSets=[]; state.logStep='workout'; render(); return; }
     if(confirm('Cancel workout? Unsaved sets will be lost.')){ swStop(); state._currentSession=null; state.pendingSets=[]; state.logStep='workout'; render(); }
   });
 
@@ -1119,43 +1096,41 @@ function attachEvents(){
 
   el('export-csv',exportAllCSV);
   el('logout-btn',handleLogout);
-  el('update-password-btn', ()=>{ if(isDemo()){ demoBlock(); return; } showUpdatePasswordModal(); });
+  el('update-password-btn', ()=>{ showUpdatePasswordModal(); });
   el('manage-invites-btn', ()=>{ if(isOwner()) showInvitesModal(); });
   document.querySelectorAll('[data-theme]').forEach(b=>b.addEventListener('click',()=>{ setTheme(b.dataset.theme); render(); }));
-  el('delete-account-btn',  ()=>{ if(isDemo()){ demoBlock(); return; } showDeleteAccountModal(); });
+  el('delete-account-btn',  ()=>{ showDeleteAccountModal(); });
   el('show-privacy-btn', ()=>showPolicyModal('Privacy Policy', PRIVACY_POLICY));
   el('show-tos-btn',     ()=>showPolicyModal('Terms of Service', TERMS_OF_SERVICE));
-  el('support-submit-btn', ()=>{ if(isDemo()){ demoBlock(); return; } submitSupportMessage(); });
+  el('support-submit-btn', ()=>{ submitSupportMessage(); });
 
-  el('edit-goals-btn',()=>{ if(isDemo()){ demoBlock(); return; } showGoalsModal(); });
-  el('add-food-btn',()=>{ if(isDemo()){ demoBlock(); return; } showAddFoodModal(); });
+  el('edit-goals-btn',()=>{ showGoalsModal(); });
+  el('add-food-btn',()=>{ showAddFoodModal(); });
 
-  document.querySelectorAll('[data-del-food]').forEach(b=>b.addEventListener('click',()=>{ if(isDemo()){ demoBlock(); return; } state.foodLog=state.foodLog.filter(e=>e.id!==b.dataset.delFood); render(); dbDeleteFood(b.dataset.delFood); }));
-  document.querySelectorAll('[data-fav-food]').forEach(b=>b.addEventListener('click',()=>{ if(isDemo()){ demoBlock(); return; }
+  document.querySelectorAll('[data-del-food]').forEach(b=>b.addEventListener('click',()=>{ state.foodLog=state.foodLog.filter(e=>e.id!==b.dataset.delFood); render(); dbDeleteFood(b.dataset.delFood); }));
+  document.querySelectorAll('[data-fav-food]').forEach(b=>b.addEventListener('click',()=>{ 
     const entry=state.foodLog.find(e=>e.id===b.dataset.favFood); if(!entry) return;
     if(isMealFav(entry)){ state.mealFavorites=state.mealFavorites.filter(f=>!(f.name===entry.name&&f.calories===entry.calories&&f.protein===entry.protein)); toast('Removed from favorites'); dbDeleteMealFav(state.mealFavorites.find?.[0]?.id); }
     else{ const fav={id:uid(),name:entry.name,calories:entry.calories,protein:entry.protein,carbs:entry.carbs,fat:entry.fat}; state.mealFavorites.push(fav); toast('Saved as favorite ★'); dbAddMealFav(fav); }
     render();
   }));
   document.querySelectorAll('[data-log-fav]').forEach(b=>b.addEventListener('click',()=>{
-    if(isDemo()){ demoBlock(); return; }
     const fav=state.mealFavorites.find(f=>f.id===b.dataset.logFav); if(!fav) return;
     const entry={id:uid(),date:todayKey(),ts:Date.now(),name:fav.name,calories:fav.calories,protein:fav.protein,carbs:fav.carbs,fat:fav.fat};
     state.foodLog.push(entry); render(); toast(`Logged: ${fav.name}`); dbAddFood(entry);
   }));
-  document.querySelectorAll('[data-del-fav]').forEach(b=>b.addEventListener('click',()=>{ if(isDemo()){ demoBlock(); return; } const id=b.dataset.delFav; state.mealFavorites=state.mealFavorites.filter(f=>f.id!==id); render(); dbDeleteMealFav(id); }));
+  document.querySelectorAll('[data-del-fav]').forEach(b=>b.addEventListener('click',()=>{ const id=b.dataset.delFav; state.mealFavorites=state.mealFavorites.filter(f=>f.id!==id); render(); dbDeleteMealFav(id); }));
 
   el('log-weight-btn',()=>{
-    if(isDemo()){ demoBlock(); return; }
     const input=document.getElementById('wt-input'); const val=parseFloat(input.value);
     if(!val||val<=0){ toast('Enter a valid weight','var(--red)'); return; }
     const entry={id:uid(),date:Date.now(),value:val,unit:state.weightUnit};
     state.weightLog.push(entry); render(); toast('Weight logged!'); dbAddWeight(entry);
   });
-  document.querySelectorAll('[data-del-wt]').forEach(b=>b.addEventListener('click',()=>{ if(isDemo()){ demoBlock(); return; } const id=b.dataset.delWt; state.weightLog=state.weightLog.filter(e=>e.id!==id); render(); dbDeleteWeight(id); }));
-  el('add-custom-btn', ()=>{ if(isDemo()){ demoBlock(); return; } showAddExerciseModal(); });
+  document.querySelectorAll('[data-del-wt]').forEach(b=>b.addEventListener('click',()=>{ const id=b.dataset.delWt; state.weightLog=state.weightLog.filter(e=>e.id!==id); render(); dbDeleteWeight(id); }));
+  el('add-custom-btn', ()=>{ showAddExerciseModal(); });
   document.querySelectorAll('[data-del-custom]').forEach(b=>b.addEventListener('click',async e=>{
-    e.stopPropagation(); if(isDemo()){ demoBlock(); return; }
+    e.stopPropagation(); 
     const id=b.dataset.delCustom; state.customExercises=state.customExercises.filter(e=>e.id!==id);
     render(); dbDeleteCustomExercise(id);
   }));
