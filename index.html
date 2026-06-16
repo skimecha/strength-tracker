@@ -181,7 +181,7 @@ const sb = createClient(SUPABASE_URL, SUPABASE_KEY, {
 function setTheme(t){ const light=(t==='light'); state.theme=t; localStorage.setItem('li_theme',t); document.documentElement.classList.toggle('light',light); const m=document.querySelector('meta[name="theme-color"]'); if(m) m.content=light?'#f4f6fb':'#0f1117'; }
 function isOwner(){ return currentUser?.id === OWNER_UID; }
 
-const APP_VERSION = '2.11.2';
+const APP_VERSION = '2.11.3';
 const OWNER_UID     = '031a65ed-f52d-4a67-b271-47778e920c22';
 // Invite code from the URL (?invite=CODE) — drives the invite-only signup flow.
 let pendingInvite = new URLSearchParams(location.search).get('invite');
@@ -629,7 +629,7 @@ function renderSets(){
       <div class="increments">${[1,2,5,10].map(v=>`<div class="inc-btn ${state.repsInc===v?'active':''}" data-rinc="${v}">${v}</div>`).join('')}</div></div>
     </div>
     ${state.pendingSets.length?`<div class="card"><div class="card-title">Logged Sets</div><div class="section-gap">${state.pendingSets.map((s,i)=>`<div class="set-row"><div class="set-badge ${s.type}">${s.type==='warmup'?'WU':'W'+workingIdx(i)}</div><div class="set-info">${s.weight} lbs × ${s.reps} reps</div><button class="set-del" data-del="${i}">✕</button></div>`).join('')}</div></div>`:''}
-    <button class="btn btn-outline btn-full" id="log-set">+ Log Set</button>
+    <button class="btn btn-primary btn-full" id="log-set">+ Log Set</button>
     ${renderTimer()}
     <hr class="divider">
     <div class="btn-grid"><button class="btn btn-outline" id="next-exercise">Next Exercise</button><button class="btn btn-outline" id="new-muscle">New Muscle</button></div>
@@ -980,7 +980,7 @@ function renderMore(){
     </div>
     <div class="card">
       <div class="card-title">Support</div>
-      <div style="font-size:13px;color:var(--text-muted);margin-bottom:12px">Have a question or found a bug? Let us know.</div>
+      <div style="font-size:13px;color:var(--text-muted);margin-bottom:12px">Have a question, suggestion, or found a bug? Let us know.</div>
       <textarea id="support-msg" placeholder="Describe your question or issue…" style="min-height:100px;resize:vertical;font-size:14px;padding:10px 12px;border-radius:var(--radius-sm);width:100%;background:var(--surface2);border:1px solid var(--border);color:var(--text)"></textarea>
       <button class="btn btn-primary btn-full" id="support-submit-btn" style="margin-top:10px">Send Message</button>
       <div style="text-align:center;margin-top:10px;font-size:12px;color:var(--text-muted)">
