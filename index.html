@@ -181,7 +181,7 @@ const sb = createClient(SUPABASE_URL, SUPABASE_KEY, {
 function setTheme(t){ const light=(t==='light'); state.theme=t; localStorage.setItem('li_theme',t); document.documentElement.classList.toggle('light',light); const m=document.querySelector('meta[name="theme-color"]'); if(m) m.content=light?'#f4f6fb':'#0f1117'; }
 function isOwner(){ return currentUser?.id === OWNER_UID; }
 
-const APP_VERSION = '2.11.3';
+const APP_VERSION = '2.11.4';
 const OWNER_UID     = '031a65ed-f52d-4a67-b271-47778e920c22';
 // Invite code from the URL (?invite=CODE) — drives the invite-only signup flow.
 let pendingInvite = new URLSearchParams(location.search).get('invite');
@@ -842,7 +842,7 @@ function renderNutrition(){
       <div class="toggle-opt ${view==='chart'?'active':''}" onclick="state.nutritionView='chart';render()">Chart</div>
     </div>
     ${view==='log'?`
-      ${state.mealFavorites.length?`<div class="card"><div class="card-title">Favorites — tap to log</div><div class="section-gap">${state.mealFavorites.map(f=>`<div style="display:flex;align-items:center;gap:10px"><div style="flex:1;min-width:0;cursor:pointer" data-log-fav="${f.id}"><div style="font-size:14px;font-weight:700;color:var(--text)">${esc(f.name)}</div><div style="font-size:12px;color:var(--text-muted);margin-top:1px">${f.calories} kcal · P:${f.protein}g C:${f.carbs}g F:${f.fat}g</div></div><button class="btn btn-outline btn-xs" data-log-fav="${f.id}" style="flex-shrink:0">+ Log</button><button class="fav-del" data-del-fav="${f.id}" title="Remove favorite">★</button></div>`).join('<hr class="divider" style="margin:2px 0">')}</div></div>`:''}
+      ${state.mealFavorites.length?`<div class="card"><div class="card-title">Favorites</div><div class="section-gap">${state.mealFavorites.map(f=>`<div style="display:flex;align-items:center;gap:10px"><div style="flex:1;min-width:0;cursor:pointer" data-edit-fav="${f.id}" title="Edit favorite"><div style="font-size:14px;font-weight:700;color:var(--text)">${esc(f.name)}</div><div style="font-size:12px;color:var(--text-muted);margin-top:1px">${f.calories} kcal · P:${f.protein}g C:${f.carbs}g F:${f.fat}g</div></div><button class="btn btn-outline btn-xs" data-log-fav="${f.id}" style="flex-shrink:0">+ Log</button><button class="fav-del" data-del-fav="${f.id}" title="Remove favorite">★</button></div>`).join('<hr class="divider" style="margin:2px 0">')}</div></div>`:''}
       <button class="btn btn-primary" id="add-food-btn">+ Add Food / Meal</button>
       ${todayEntries.length?`<div class="card"><div class="card-title">Today's Log</div><div class="section-gap">${[...todayEntries].reverse().map(e=>`<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:8px"><div style="flex:1;min-width:0"><div style="font-size:14px;font-weight:700;color:var(--text)">${esc(e.name)}</div><div style="font-size:12px;color:var(--text-muted);margin-top:2px">${fmtTime(e.ts)} · P:${e.protein}g C:${e.carbs}g F:${e.fat}g</div></div><div style="text-align:right;flex-shrink:0;display:flex;flex-direction:column;align-items:flex-end;gap:4px"><div style="font-size:16px;font-weight:800;color:var(--text)">${e.calories} kcal</div><div style="display:flex;gap:6px"><button class="btn btn-xs ${isMealFav(e)?'btn-amber':'btn-outline'}" data-fav-food="${e.id}" title="${isMealFav(e)?'Remove from favorites':'Save as favorite'}">★</button><button class="btn btn-xs btn-danger" data-del-food="${e.id}">✕</button></div></div></div>`).join('<hr class="divider" style="margin:2px 0">')}</div></div>`:''}
       <div style="font-size:11px;color:var(--text-muted);text-align:center">Export all data from the History tab</div>
@@ -1119,6 +1119,7 @@ function attachEvents(){
     const entry={id:uid(),date:todayKey(),ts:Date.now(),name:fav.name,calories:fav.calories,protein:fav.protein,carbs:fav.carbs,fat:fav.fat};
     state.foodLog.push(entry); render(); toast(`Logged: ${fav.name}`); dbAddFood(entry);
   }));
+  document.querySelectorAll('[data-edit-fav]').forEach(b=>b.addEventListener('click',()=>showEditFavModal(b.dataset.editFav)));
   document.querySelectorAll('[data-del-fav]').forEach(b=>b.addEventListener('click',()=>{ const id=b.dataset.delFav; state.mealFavorites=state.mealFavorites.filter(f=>f.id!==id); render(); dbDeleteMealFav(id); }));
 
   el('log-weight-btn',()=>{
@@ -1261,6 +1262,22 @@ function showAddFoodModal(){
     const name=$('f-name').value.trim(); if(!name){ toast('Enter a food name','var(--red)'); return; }
     const entry={id:uid(),date:todayKey(),ts:Date.now(),name,calories:parseInt($('f-cal').value)||0,protein:parseFloat($('f-pro').value)||0,carbs:parseFloat($('f-carb').value)||0,fat:parseFloat($('f-fat').value)||0};
     state.foodLog.push(entry); closeModal(); render(); dbAddFood(entry);
+  });
+}
+
+function showEditFavModal(id){
+  const fav=state.mealFavorites.find(f=>f.id===id); if(!fav) return;
+  document.getElementById('modal-root').innerHTML=`<div class="modal-overlay" id="modal-overlay"><div class="modal"><div class="modal-title">Edit Favorite</div><div class="field"><label>Name</label><input type="text" id="ef-name" value="${esc(fav.name)}"></div><div class="field"><label>Calories (kcal)</label><input type="number" id="ef-cal" value="${fav.calories}"></div><div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px"><div class="field"><label>Protein (g)</label><input type="number" id="ef-pro" value="${fav.protein}"></div><div class="field"><label>Carbs (g)</label><input type="number" id="ef-carb" value="${fav.carbs}"></div><div class="field"><label>Fat (g)</label><input type="number" id="ef-fat" value="${fav.fat}"></div></div><div class="btn-grid"><button class="btn btn-outline" id="modal-cancel">Cancel</button><button class="btn btn-primary" id="ef-save">Save</button></div></div></div>`;
+  document.getElementById('modal-cancel').addEventListener('click',closeModal);
+  document.getElementById('modal-overlay').addEventListener('click',e=>{ if(e.target===e.currentTarget) closeModal(); });
+  document.getElementById('ef-save').addEventListener('click',()=>{
+    const name=document.getElementById('ef-name').value.trim(); if(!name){ toast('Enter a food name','var(--red)'); return; }
+    fav.name=name;
+    fav.calories=parseInt(document.getElementById('ef-cal').value)||0;
+    fav.protein=parseFloat(document.getElementById('ef-pro').value)||0;
+    fav.carbs=parseFloat(document.getElementById('ef-carb').value)||0;
+    fav.fat=parseFloat(document.getElementById('ef-fat').value)||0;
+    closeModal(); render(); dbAddMealFav(fav);
   });
 }
 
