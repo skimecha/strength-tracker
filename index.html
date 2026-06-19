@@ -184,7 +184,7 @@ function toggleTheme(){ setTheme(state.theme==='light'?'dark':'light'); render()
 function versionStamp(){ return `<div style="display:flex;align-items:center;gap:6px"><div style="font-size:10px;color:var(--text-muted);font-weight:600">v${APP_VERSION}</div><button onclick="toggleTheme()" title="Toggle light/dark mode" aria-label="Toggle light/dark mode" style="background:none;border:none;cursor:pointer;font-size:14px;line-height:1;padding:0;color:var(--text-muted)">${state.theme==='light'?'🌙':'☀️'}</button></div>`; }
 function isOwner(){ return currentUser?.id === OWNER_UID; }
 
-const APP_VERSION = '2.11.8';
+const APP_VERSION = '2.12.0';
 const OWNER_UID     = '031a65ed-f52d-4a67-b271-47778e920c22';
 // Invite code from the URL (?invite=CODE) — drives the invite-only signup flow.
 let pendingInvite = new URLSearchParams(location.search).get('invite');
@@ -453,6 +453,13 @@ async function dbAddFood(entry){
   return data;
 }
 async function dbDeleteFood(id){ await sb.from('food_log').delete().eq('id',id).eq('user_id',currentUser.id); }
+// AI macro estimate via the ai-macros Edge Function (Claude). Returns {type:'macros',...} or {type:'clarify',...}.
+async function aiMacros(payload){
+  const res=await fetch(`${SUPABASE_URL}/functions/v1/ai-macros`,{method:'POST',headers:{'Content-Type':'application/json','apikey':SUPABASE_KEY,'Authorization':`Bearer ${SUPABASE_KEY}`},body:JSON.stringify(payload)});
+  let data={}; try{ data=await res.json(); }catch(e){}
+  if(!res.ok||data.error) throw new Error(data.error||'AI unavailable');
+  return data;
+}
 async function dbAddMealFav(fav){
   const {data}=await sb.from('meal_favorites').upsert({id:fav.id,user_id:currentUser.id,name:fav.name,calories:fav.calories,protein:fav.protein,carbs:fav.carbs,fat:fav.fat}).select().single();
   return data;
@@ -1218,13 +1225,50 @@ function showGoalsModal(){
 }
 
 function showAddFoodModal(){
-  document.getElementById('modal-root').innerHTML=`<div class="modal-overlay" id="modal-overlay"><div class="modal"><div class="modal-title">Add Food / Meal</div><div class="field"><label>Name</label><input type="text" id="f-name" placeholder="e.g. Chicken breast…"></div><div class="field"><label>Calories (kcal)</label><input type="number" id="f-cal" placeholder="0"></div><div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px"><div class="field"><label>Protein (g)</label><input type="number" id="f-pro" placeholder="0"></div><div class="field"><label>Carbs (g)</label><input type="number" id="f-carb" placeholder="0"></div><div class="field"><label>Fat (g)</label><input type="number" id="f-fat" placeholder="0"></div></div><div class="btn-grid"><button class="btn btn-outline" id="modal-cancel">Cancel</button><button class="btn btn-primary" id="modal-save-food">Add</button></div></div></div>`;
-  document.getElementById('modal-cancel').addEventListener('click',closeModal);
-  document.getElementById('modal-overlay').addEventListener('click',e=>{ if(e.target===e.currentTarget) closeModal(); });
-  document.getElementById('f-name').focus();
-  document.getElementById('modal-save-food').addEventListener('click',()=>{
-    const name=document.getElementById('f-name').value.trim(); if(!name){ toast('Enter a food name','var(--red)'); return; }
-    const entry={id:uid(),date:todayKey(),ts:Date.now(),name,calories:parseInt(document.getElementById('f-cal').value)||0,protein:parseFloat(document.getElementById('f-pro').value)||0,carbs:parseFloat(document.getElementById('f-carb').value)||0,fat:parseFloat(document.getElementById('f-fat').value)||0};
+  let aiNotes=[];
+  const UNITS=['units','oz','g','lb','cup','tbsp','tsp','ml','slice'];
+  document.getElementById('modal-root').innerHTML=`<div class="modal-overlay" id="modal-overlay"><div class="modal" style="max-height:88vh;overflow-y:auto">
+    <div class="modal-title">Add Food / Meal</div>
+    <div class="field"><label>Name</label><input type="text" id="f-name" placeholder="e.g. Chicken breast…"></div>
+    <div style="display:grid;grid-template-columns:1fr 1.2fr auto;gap:8px;align-items:end">
+      <div class="field" style="margin:0"><label>Qty</label><input type="number" id="f-qty" value="1" min="0" step="0.5" inputmode="decimal"></div>
+      <div class="field" style="margin:0"><label>Unit</label><select id="f-unit" style="font-size:14px;padding:10px 12px;border-radius:var(--radius-sm);width:100%;background:var(--surface2);border:1px solid var(--border);color:var(--text)">${UNITS.map(u=>`<option value="${u}">${u}</option>`).join('')}</select></div>
+      <button class="btn btn-outline" id="ai-macros-btn" title="Estimates macros with Claude (AI) from the food name and amount. These are approximations and can be wrong — double-check the numbers before relying on them." style="white-space:nowrap">✨ AI Macros</button>
+    </div>
+    <div id="ai-status" style="margin:6px 0 0"></div>
+    <div class="field" style="margin-top:10px"><label>Calories (kcal)</label><input type="number" id="f-cal" placeholder="0"></div>
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px"><div class="field"><label>Protein (g)</label><input type="number" id="f-pro" placeholder="0"></div><div class="field"><label>Carbs (g)</label><input type="number" id="f-carb" placeholder="0"></div><div class="field"><label>Fat (g)</label><input type="number" id="f-fat" placeholder="0"></div></div>
+    <div class="btn-grid"><button class="btn btn-outline" id="modal-cancel">Cancel</button><button class="btn btn-primary" id="modal-save-food">Add</button></div>
+  </div></div>`;
+  const $=id=>document.getElementById(id);
+  $('modal-cancel').addEventListener('click',closeModal);
+  $('modal-overlay').addEventListener('click',e=>{ if(e.target===e.currentTarget) closeModal(); });
+  $('f-name').focus();
+
+  const note=(html)=>{ $('ai-status').innerHTML=html; };
+  async function runAI(){
+    const name=$('f-name').value.trim(); if(!name){ toast('Enter a food name first','var(--red)'); return; }
+    const qty=parseFloat($('f-qty').value)||1; const unit=$('f-unit').value;
+    const btn=$('ai-macros-btn'); btn.disabled=true;
+    note(`<div style="font-size:12px;color:var(--text-muted)">✨ Estimating…</div>`);
+    try{
+      const r=await aiMacros({food:name,qty,unit,clarification:aiNotes.join('; ')});
+      if(r.type==='clarify'){
+        note(`<div style="background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:10px"><div style="font-size:13px;color:var(--text);font-weight:600;margin-bottom:8px">${esc(r.question)}</div><div style="display:flex;flex-wrap:wrap;gap:6px">${(r.options||[]).map((o,i)=>`<button class="btn btn-outline btn-xs" data-aiopt="${i}">${esc(o)}</button>`).join('')}</div></div>`);
+        $('ai-status').querySelectorAll('[data-aiopt]').forEach(b=>b.addEventListener('click',()=>{ aiNotes.push(`${r.question} → ${r.options[+b.dataset.aiopt]}`); runAI(); }));
+      } else if(r.type==='macros'){
+        $('f-cal').value=r.calories; $('f-pro').value=r.protein; $('f-carb').value=r.carbs; $('f-fat').value=r.fat;
+        const detail=[r.basis,r.assumptions].filter(Boolean).map(esc).join(' · ');
+        note(`<div style="font-size:12px;color:var(--amber)">✨ AI estimate — verify before relying on it.${detail?`<div style="color:var(--text-muted);margin-top:2px">${detail}</div>`:''}</div>`);
+      } else { note(`<div style="font-size:12px;color:var(--text-muted)">Couldn't estimate — enter manually.</div>`); }
+    }catch(err){ note(`<div style="font-size:12px;color:var(--text-muted)">AI unavailable — enter macros manually.</div>`); }
+    btn.disabled=false;
+  }
+  $('ai-macros-btn').addEventListener('click',()=>{ aiNotes=[]; runAI(); });
+
+  $('modal-save-food').addEventListener('click',()=>{
+    const name=$('f-name').value.trim(); if(!name){ toast('Enter a food name','var(--red)'); return; }
+    const entry={id:uid(),date:todayKey(),ts:Date.now(),name,calories:parseInt($('f-cal').value)||0,protein:parseFloat($('f-pro').value)||0,carbs:parseFloat($('f-carb').value)||0,fat:parseFloat($('f-fat').value)||0};
     state.foodLog.push(entry); closeModal(); render(); dbAddFood(entry);
   });
 }
