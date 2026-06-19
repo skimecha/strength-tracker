@@ -185,7 +185,7 @@ function toggleTheme(){ setTheme(state.theme==='light'?'dark':'light'); render()
 function versionStamp(){ return `<div style="display:flex;align-items:center;gap:6px"><div style="font-size:10px;color:var(--text-muted);font-weight:600">v${APP_VERSION}</div><button onclick="toggleTheme()" title="Toggle light/dark mode" aria-label="Toggle light/dark mode" style="background:none;border:none;cursor:pointer;font-size:14px;line-height:1;padding:0;color:var(--text-muted)">${state.theme==='light'?'🌙':'☀️'}</button></div>`; }
 function isOwner(){ return currentUser?.id === OWNER_UID; }
 
-const APP_VERSION = '2.12.3';
+const APP_VERSION = '2.13.0';
 const OWNER_UID     = '031a65ed-f52d-4a67-b271-47778e920c22';
 // Invite code from the URL (?invite=CODE) — drives the invite-only signup flow.
 let pendingInvite = new URLSearchParams(location.search).get('invite');
@@ -229,7 +229,7 @@ let state = {
   setType:'working',weight:45,reps:10,weightInc:5,repsInc:1,
   pendingSets:[],_currentSession:null,
   sessions:[],prs:{},favorites:[],customExercises:[],
-  historyTab:'sessions',
+  historyTab:'sessions', volumePeriod:'week',
   weightView:'list', weightPeriod:'1m',
   nutritionView:'log', nutritionPeriod:'1m', calorieDisplay:'total',
   timer:{remaining:0,total:0,interval:null,running:false},
@@ -912,6 +912,7 @@ function renderHistory(){
     <div class="toggle-group">
       <div class="toggle-opt ${state.historyTab==='sessions'?'active':''}" data-histtab="sessions">Workouts</div>
       <div class="toggle-opt ${state.historyTab==='records'?'active':''}" data-histtab="records">Records</div>
+      <div class="toggle-opt ${state.historyTab==='volume'?'active':''}" data-histtab="volume">Volume</div>
     </div>
 
     ${state.historyTab==='sessions'?`
@@ -932,7 +933,7 @@ function renderHistory(){
             return `<div class="history-exercise">${ex.muscle} — ${ex.name}</div><div class="history-sets">${ex.sets.map(set=>`${set.type==='warmup'?'WU':'●'} ${set.weight}lbs × ${set.reps}`).join('  ')}</div>`;
           }).join('')}
         </div>`).join('')}
-    `:`
+    `:state.historyTab==='records'?`
       ${prs.length===0?'<div class="empty">No records yet.</div>':`
         <div class="section-gap">
           ${prs.map(([ex,pr])=>`
@@ -947,6 +948,26 @@ function renderHistory(){
               </div>
             </div>`).join('')}
         </div>`}
+    `:`${renderVolumeTab()}`}`;
+}
+
+function startOfWeekMonday(ts){ const d=new Date(ts); d.setHours(0,0,0,0); const day=d.getDay(); d.setDate(d.getDate()-(day===0?6:day-1)); return d.getTime(); }
+function renderVolumeTab(){
+  const period=state.volumePeriod, now=Date.now();
+  const opts=[['week','This week'],['7d','7 days'],['14d','14 days'],['1m','1 month']];
+  const start=period==='week'?startOfWeekMonday(now):period==='7d'?now-7*864e5:period==='14d'?now-14*864e5:now-30*864e5;
+  const map={};
+  state.sessions.forEach(s=>{ if(s.date<start) return; (s.exercises||[]).forEach(ex=>{ if(ex.type==='cardio'||!ex.sets) return; const m=ex.muscle||'Other'; ex.sets.forEach(set=>{ if(set.type!=='working') return; if(!map[m]) map[m]={volume:0,sets:0}; map[m].volume+=(parseFloat(set.weight)||0)*(parseInt(set.reps)||0); map[m].sets+=1; }); }); });
+  const rows=Object.entries(map).sort((a,b)=>b[1].volume-a[1].volume);
+  const maxVol=rows.length?rows[0][1].volume:0;
+  const totalVol=rows.reduce((a,r)=>a+r[1].volume,0), totalSets=rows.reduce((a,r)=>a+r[1].sets,0);
+  return `
+    <div style="display:flex;gap:6px;overflow-x:auto;padding-bottom:2px;flex-shrink:0">
+      ${opts.map(([v,l])=>`<button class="period-btn ${period===v?'active':''}" onclick="state.volumePeriod='${v}';render()">${l}</button>`).join('')}
+    </div>
+    ${rows.length===0?'<div class="empty">No working sets logged in this period.</div>':`
+      <div style="font-size:12px;color:var(--text-muted);text-align:center;margin:2px 0 6px">${Math.round(totalVol).toLocaleString()} lbs total volume · ${totalSets} working set${totalSets!==1?'s':''}</div>
+      <div class="card"><div class="section-gap">${rows.map(([m,d])=>{ const pct=maxVol>0?Math.round(d.volume/maxVol*100):0; return `<div><div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:4px"><span style="font-size:14px;font-weight:700;color:var(--text)">${esc(m)}</span><span style="font-size:13px;color:var(--text-muted)"><b style="color:var(--text)">${Math.round(d.volume).toLocaleString()}</b> lbs · ${d.sets} set${d.sets!==1?'s':''}</span></div><div class="macro-bar-wrap"><div class="macro-bar" style="width:${pct}%;background:var(--accent)"></div></div></div>`; }).join('')}</div></div>
     `}`;
 }
 
