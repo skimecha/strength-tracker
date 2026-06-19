@@ -85,6 +85,7 @@ select:focus,input:focus{outline:none;border-color:var(--accent)}
 .toggle-group{display:flex;flex-shrink:0;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);overflow:hidden}
 .toggle-opt{flex:1;padding:10px;text-align:center;font-size:14px;font-weight:700;cursor:pointer;transition:background .15s,color .15s;color:var(--text-muted)}
 .toggle-opt.active{background:var(--accent);color:#fff}
+.select{appearance:none;-webkit-appearance:none;background-color:var(--surface2);background-image:url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='12'%20height='12'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='%23808aa0'%20stroke-width='2.5'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Cpolyline%20points='6%209%2012%2015%2018%209'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 10px center;border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);font-size:14px;padding:10px 30px 10px 12px;width:100%;cursor:pointer}
 .muscle-grid{display:grid;grid-template-columns:1fr 1fr;gap:9px}
 .muscle-btn{background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:14px 10px;text-align:center;font-size:14px;font-weight:700;color:var(--text);cursor:pointer;transition:border-color .15s,background .15s}
 .muscle-btn:active{border-color:var(--accent);background:var(--accent-dim)}
@@ -184,7 +185,7 @@ function toggleTheme(){ setTheme(state.theme==='light'?'dark':'light'); render()
 function versionStamp(){ return `<div style="display:flex;align-items:center;gap:6px"><div style="font-size:10px;color:var(--text-muted);font-weight:600">v${APP_VERSION}</div><button onclick="toggleTheme()" title="Toggle light/dark mode" aria-label="Toggle light/dark mode" style="background:none;border:none;cursor:pointer;font-size:14px;line-height:1;padding:0;color:var(--text-muted)">${state.theme==='light'?'🌙':'☀️'}</button></div>`; }
 function isOwner(){ return currentUser?.id === OWNER_UID; }
 
-const APP_VERSION = '2.12.1';
+const APP_VERSION = '2.12.2';
 const OWNER_UID     = '031a65ed-f52d-4a67-b271-47778e920c22';
 // Invite code from the URL (?invite=CODE) — drives the invite-only signup flow.
 let pendingInvite = new URLSearchParams(location.search).get('invite');
@@ -1238,7 +1239,7 @@ function showAddFoodModal(){
     <div class="field"><label>Name</label><input type="text" id="f-name" placeholder="e.g. Chicken breast…"></div>
     <div style="display:grid;grid-template-columns:1fr 1.2fr auto;gap:8px;align-items:end">
       <div class="field" style="margin:0"><label>Qty</label><input type="number" id="f-qty" value="1" min="0" step="0.5" inputmode="decimal"></div>
-      <div class="field" style="margin:0"><label>Unit</label><select id="f-unit" style="font-size:14px;padding:10px 12px;border-radius:var(--radius-sm);width:100%;background:var(--surface2);border:1px solid var(--border);color:var(--text)">${UNITS.map(u=>`<option value="${u}">${u}</option>`).join('')}</select></div>
+      <div class="field" style="margin:0"><label>Unit</label><select id="f-unit" class="select">${UNITS.map(u=>`<option value="${u}">${u}</option>`).join('')}</select></div>
       <button class="btn btn-outline" id="ai-macros-btn" title="Estimates macros with Claude (AI) from the food name and amount. These are approximations and can be wrong — double-check the numbers before relying on them." style="white-space:nowrap">✨ AI Macros</button>
     </div>
     <div id="ai-status" style="margin:6px 0 0"></div>
