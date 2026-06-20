@@ -185,8 +185,23 @@ function toggleTheme(){ setTheme(state.theme==='light'?'dark':'light'); render()
 // Version number + quick light/dark toggle, shown in every section header.
 function versionStamp(){ return `<div style="display:flex;align-items:center;gap:6px"><div style="font-size:10px;color:var(--text-muted);font-weight:600">v${APP_VERSION}</div><button onclick="toggleTheme()" title="Toggle light/dark mode" aria-label="Toggle light/dark mode" style="background:none;border:none;cursor:pointer;font-size:14px;line-height:1;padding:0;color:var(--text-muted)">${state.theme==='light'?'🌙':'☀️'}</button></div>`; }
 function isOwner(){ return currentUser?.id === OWNER_UID; }
+// Owner-only metrics. The call is gated client-side on isOwner() so a normal
+// user's browser never even makes the request — but the real lock is the
+// server: admin_metrics() (security definer) checks auth.uid() and returns
+// null to anyone who isn't the owner, so the data is unreachable even if the
+// client check is bypassed. See supabase/admin-metrics.sql.
+let _adminLoaded=false;
+async function loadAdminMetrics(){
+  if(!isOwner()||_adminLoaded) return;
+  _adminLoaded=true;
+  try{
+    const {data,error}=await sb.rpc('admin_metrics');
+    if(!error&&data){ state.adminMetrics=data; if(state.view==='more') render(); }
+    else _adminLoaded=false;  // allow a retry next time More opens (e.g. SQL not deployed yet)
+  }catch(e){ _adminLoaded=false; }
+}
 
-const APP_VERSION = '2.16.3';
+const APP_VERSION = '2.17.0';
 const OWNER_UID     = '031a65ed-f52d-4a67-b271-47778e920c22';
 // Invite code from the URL (?invite=CODE) — drives the invite-only signup flow.
 let pendingInvite = new URLSearchParams(location.search).get('invite');
@@ -230,7 +245,7 @@ let state = {
   setType:'working',weight:45,reps:10,weightInc:5,repsInc:1,
   pendingSets:[],_currentSession:null,
   sessions:[],prs:{},favorites:[],customExercises:[],
-  historyTab:'plan', volumePeriod:'week', goal: localStorage.getItem('li_goal')||'hypertrophy', strengthRedMode: localStorage.getItem('li_str_red')||'fixed', planTargets:{hypertrophy:{},strength:{}},
+  historyTab:'plan', volumePeriod:'week', goal: localStorage.getItem('li_goal')||'hypertrophy', strengthRedMode: localStorage.getItem('li_str_red')||'fixed', planTargets:{hypertrophy:{},strength:{}}, adminMetrics:null,
   weightView:'list', weightPeriod:'1m',
   nutritionView:'log', nutritionPeriod:'1m', calorieDisplay:'total',
   timer:{remaining:0,total:0,interval:null,running:false},
@@ -272,6 +287,7 @@ function resetAppState(){
   state.macroGoals={calories:2500,protein:180,carbs:250,fat:80};
   state.logStep='type'; state._currentSession=null; state.pendingSets=[]; state.view='log';
   swStop(); state.cardio={activity:null,stopwatch:{running:false,elapsed:0,interval:null},distance:'',distUnit:'mi',heartRate:null,hrTestStep:'idle',hrTestCountdown:0,hrTestInterval:null,hrBeats:''};
+  state.adminMetrics=null; _adminLoaded=false;
 }
 
 async function loadUserData(){
@@ -1085,7 +1101,18 @@ function showAllUpdates(){
   document.getElementById('modal-cancel').addEventListener('click',closeModal);
   document.getElementById('modal-overlay').addEventListener('click',e=>{ if(e.target===e.currentTarget) closeModal(); });
 }
+function adminCardHTML(){
+  if(!isOwner()) return '';
+  const m=state.adminMetrics;
+  const stat=(v,l)=>`<div><div style="font-size:26px;font-weight:800;color:var(--text);line-height:1.1">${v}</div><div style="font-size:11px;color:var(--text-muted);margin-top:2px">${l}</div></div>`;
+  return `<div class="card">
+      <div class="card-title">Admin · Users</div>
+      ${m?`<div style="display:flex;gap:24px;flex-wrap:wrap">${stat(m.users??'—','Registered')}${stat(m.confirmed??'—','Confirmed')}${stat(m.new_7d??'—','New · 7d')}</div>`
+         :`<div style="font-size:13px;color:var(--text-muted)">Loading…</div>`}
+    </div>`;
+}
 function renderMore(){
+  loadAdminMetrics();
   return `
     <div style="display:flex;align-items:baseline;justify-content:space-between"><div class="page-title">More</div>${versionStamp()}</div>
 
@@ -1094,6 +1121,8 @@ function renderMore(){
       <div style="font-size:14px;color:var(--text);margin-bottom:14px;word-break:break-all">${currentUser?.email||''}</div>
       <button class="btn btn-outline btn-full" id="update-password-btn">Update Password</button>
     </div>
+
+    ${adminCardHTML()}
 
     <div class="card">
       <div class="card-title">Appearance</div>
