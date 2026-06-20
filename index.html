@@ -247,7 +247,9 @@ async function loadSupportTickets(force){
     rows.sort((a,b)=>new Date(b.created_at||0)-new Date(a.created_at||0));
     state.supportTickets=rows;
   }catch(e){
-    _supportLoaded=false;
+    // Keep _supportLoaded=true so the render() below (and renderAdmin's own
+    // loadSupportTickets call) don't re-trigger the load and spin into an
+    // infinite render/fetch loop. Only the Retry button (force=true) re-attempts.
     state.supportError=(e&&(e.message||e.hint||e.code))||'Unknown error';
     console.error('loadSupportTickets failed:',e);
   }
@@ -267,7 +269,7 @@ async function deleteTicket(id){
   await loadSupportTickets(true); toast('Ticket deleted'); render();
 }
 
-const APP_VERSION = '2.19.1';
+const APP_VERSION = '2.19.2';
 const OWNER_UID     = '031a65ed-f52d-4a67-b271-47778e920c22';
 // Invite code from the URL (?invite=CODE) — drives the invite-only signup flow.
 let pendingInvite = new URLSearchParams(location.search).get('invite');
