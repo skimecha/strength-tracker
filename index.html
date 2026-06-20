@@ -185,7 +185,7 @@ function toggleTheme(){ setTheme(state.theme==='light'?'dark':'light'); render()
 function versionStamp(){ return `<div style="display:flex;align-items:center;gap:6px"><div style="font-size:10px;color:var(--text-muted);font-weight:600">v${APP_VERSION}</div><button onclick="toggleTheme()" title="Toggle light/dark mode" aria-label="Toggle light/dark mode" style="background:none;border:none;cursor:pointer;font-size:14px;line-height:1;padding:0;color:var(--text-muted)">${state.theme==='light'?'🌙':'☀️'}</button></div>`; }
 function isOwner(){ return currentUser?.id === OWNER_UID; }
 
-const APP_VERSION = '2.13.0';
+const APP_VERSION = '2.14.0';
 const OWNER_UID     = '031a65ed-f52d-4a67-b271-47778e920c22';
 // Invite code from the URL (?invite=CODE) — drives the invite-only signup flow.
 let pendingInvite = new URLSearchParams(location.search).get('invite');
@@ -229,7 +229,7 @@ let state = {
   setType:'working',weight:45,reps:10,weightInc:5,repsInc:1,
   pendingSets:[],_currentSession:null,
   sessions:[],prs:{},favorites:[],customExercises:[],
-  historyTab:'sessions', volumePeriod:'week',
+  historyTab:'plan', volumePeriod:'week', planTargets:{},
   weightView:'list', weightPeriod:'1m',
   nutritionView:'log', nutritionPeriod:'1m', calorieDisplay:'total',
   timer:{remaining:0,total:0,interval:null,running:false},
@@ -266,7 +266,7 @@ async function initAuth(){
 }
 
 function resetAppState(){
-  state.sessions=[]; state.prs={}; state.favorites=[];
+  state.sessions=[]; state.prs={}; state.favorites=[]; state.planTargets={};
   state.foodLog=[]; state.mealFavorites=[]; state.weightLog=[];
   state.macroGoals={calories:2500,protein:180,carbs:250,fat:80};
   state.logStep='type'; state._currentSession=null; state.pendingSets=[]; state.view='log';
@@ -304,6 +304,8 @@ async function loadUserData(){
     state.macroGoals    = mg.data || {calories:2500,protein:180,carbs:250,fat:80};
     state.favorites     = (ef.data|| []).map(r=>r.exercise);
     state.customExercises = ce.data || [];
+    // Plan targets — loaded separately so a missing table never aborts the main data load.
+    try{ const pg=await sb.from('plan_targets').select('targets').eq('user_id',userId).maybeSingle(); state.planTargets=(pg.data&&pg.data.targets)||{}; }catch(e){ state.planTargets={}; }
     console.log('Loaded — sessions:',state.sessions.length,'prs:',Object.keys(state.prs).length);
   } catch(err){
     console.error('loadUserData exception:',err);
@@ -543,7 +545,7 @@ function render(){
 function renderNav(){
   const tabs=[
     {id:'log',       icon:iconPlate(),     label:'Workout'},
-    {id:'history',   icon:iconHourglass(), label:'History'},
+    {id:'history',   icon:iconHourglass(), label:'Plans'},
     {id:'nutrition', icon:iconNutrition(), label:'Nutrition'},
     {id:'bodyweight',icon:iconScale(),     label:'Weight'},
     {id:'more',      icon:iconList(),      label:'More'},
@@ -902,7 +904,7 @@ function renderHistory(){
 
   return `
     <div class="page-header">
-      <div class="page-title">History</div>
+      <div class="page-title">Plans</div>
       <div style="display:flex;align-items:center;gap:8px">
         ${versionStamp()}
         ${state.historyTab==='sessions'&&sessions.length?`<button class="btn btn-outline btn-sm" id="export-csv">⬇ Export</button>`:''}
@@ -910,12 +912,13 @@ function renderHistory(){
     </div>
 
     <div class="toggle-group">
+      <div class="toggle-opt ${state.historyTab==='plan'?'active':''}" data-histtab="plan">Plan</div>
       <div class="toggle-opt ${state.historyTab==='sessions'?'active':''}" data-histtab="sessions">Workouts</div>
       <div class="toggle-opt ${state.historyTab==='records'?'active':''}" data-histtab="records">Records</div>
       <div class="toggle-opt ${state.historyTab==='volume'?'active':''}" data-histtab="volume">Volume</div>
     </div>
 
-    ${state.historyTab==='sessions'?`
+    ${state.historyTab==='plan'?`${renderPlanTab()}`:state.historyTab==='sessions'?`
       ${sessions.length===0?'<div class="empty">No workouts logged yet.</div>':sessions.map(s=>`
         <div class="history-session">
           <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
@@ -952,6 +955,35 @@ function renderHistory(){
 }
 
 function startOfWeekMonday(ts){ const d=new Date(ts); d.setHours(0,0,0,0); const day=d.getDay(); d.setDate(d.getDate()-(day===0?6:day-1)); return d.getTime(); }
+// Working sets per muscle for the current week (Mon start).
+function weeklySetCounts(){
+  const start=startOfWeekMonday(Date.now()); const c={};
+  state.sessions.forEach(s=>{ if(s.date<start) return; (s.exercises||[]).forEach(ex=>{ if(ex.type==='cardio'||!ex.sets) return; const m=ex.muscle; if(!m) return; ex.sets.forEach(set=>{ if(set.type==='working') c[m]=(c[m]||0)+1; }); }); });
+  return c;
+}
+let _planSaveTimer=null;
+function schedulePlanSave(){ clearTimeout(_planSaveTimer); _planSaveTimer=setTimeout(dbSavePlan,600); }
+async function dbSavePlan(){ const {error}=await sb.from('plan_targets').upsert({user_id:currentUser.id,targets:state.planTargets,updated_at:new Date().toISOString()},{onConflict:'user_id'}); if(error) toast('Could not save plan','var(--red)'); }
+function renderPlanTab(){
+  const actual=weeklySetCounts(), t=state.planTargets||{};
+  return `
+    <div style="font-size:12px;color:var(--text-muted);margin-bottom:2px;line-height:1.5">Set a weekly working-set target per muscle. Progress is for this week and resets Monday. Research suggests roughly <b style="color:var(--text)">10–20 hard sets per muscle per week</b> for growth.</div>
+    ${Object.entries(GROUPS).map(([group,muscles])=>`
+      <div class="card">
+        <div class="card-title">${group}</div>
+        <div class="section-gap">
+          ${muscles.map(m=>{ const did=actual[m]||0, tgt=parseInt(t[m])||0, pct=tgt>0?Math.min(100,Math.round(did/tgt*100)):0, met=tgt>0&&did>=tgt;
+            return `<div style="display:flex;align-items:center;gap:12px">
+              <div style="flex:1;min-width:0">
+                <div style="display:flex;justify-content:space-between;align-items:baseline;gap:8px"><span style="font-size:14px;font-weight:700;color:var(--text)">${esc(m)}</span><span style="font-size:12px;color:${met?'var(--green)':'var(--text-muted)'}">${did}${tgt?` / ${tgt}`:''} sets${met?' ✓':''}</span></div>
+                <div class="macro-bar-wrap"><div class="macro-bar" style="width:${pct}%;background:${met?'var(--green)':'var(--accent)'}"></div></div>
+              </div>
+              <input type="number" min="0" step="1" value="${tgt||''}" placeholder="—" data-plan-muscle="${esc(m)}" aria-label="${esc(m)} weekly set target" style="width:56px;text-align:center;padding:8px 4px;font-size:15px;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);flex-shrink:0">
+            </div>`; }).join('')}
+        </div>
+      </div>`).join('')}
+  `;
+}
 function renderVolumeTab(){
   const period=state.volumePeriod, now=Date.now();
   const opts=[['week','This week'],['7d','7 days'],['14d','14 days'],['1m','1 month']];
@@ -1132,6 +1164,10 @@ function attachEvents(){
   document.querySelectorAll('[data-wtperiod]').forEach(b=>b.addEventListener('click',()=>{ state.weightPeriod=b.dataset.wtperiod; render(); }));
 
   document.querySelectorAll('[data-histtab]').forEach(b=>b.addEventListener('click',()=>{ state.historyTab=b.dataset.histtab; render(); }));
+  document.querySelectorAll('[data-plan-muscle]').forEach(b=>{
+    b.addEventListener('input',()=>{ const m=b.dataset.planMuscle, v=parseInt(b.value)||0; if(v>0) state.planTargets[m]=v; else delete state.planTargets[m]; schedulePlanSave(); });
+    b.addEventListener('change',()=>render());
+  });
   document.querySelectorAll('.pr-card').forEach(b=>b.addEventListener('click',()=>showPRModal(b.dataset.pr)));
 
   el('export-csv',exportAllCSV);
