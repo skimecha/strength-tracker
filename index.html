@@ -269,7 +269,7 @@ async function deleteTicket(id){
   await loadSupportTickets(true); toast('Ticket deleted'); render();
 }
 
-const APP_VERSION = '2.19.2';
+const APP_VERSION = '2.20.0';
 const OWNER_UID     = '031a65ed-f52d-4a67-b271-47778e920c22';
 // Invite code from the URL (?invite=CODE) — drives the invite-only signup flow.
 let pendingInvite = new URLSearchParams(location.search).get('invite');
@@ -548,6 +548,13 @@ async function aiMacros(payload){
   let data={}; try{ data=await res.json(); }catch(e){}
   if(!res.ok||data.error) throw new Error(data.error||'AI unavailable');
   return data;
+}
+// Record a user-accepted macro entry into the shared cache (fire-and-forget).
+// Seeds/refines the cache so repeat foods are served without an AI call.
+function aiMacrosRecord(payload){
+  try{
+    fetch(`${SUPABASE_URL}/functions/v1/ai-macros`,{method:'POST',headers:{'Content-Type':'application/json','apikey':SUPABASE_KEY,'Authorization':`Bearer ${SUPABASE_KEY}`},body:JSON.stringify({action:'record',...payload})}).catch(()=>{});
+  }catch(e){}
 }
 async function dbAddMealFav(fav){
   const {data}=await sb.from('meal_favorites').upsert({id:fav.id,user_id:currentUser.id,name:fav.name,calories:fav.calories,protein:fav.protein,carbs:fav.carbs,fat:fav.fat}).select().single();
@@ -1565,6 +1572,7 @@ function showGoalsModal(){
 
 function showAddFoodModal(){
   let aiNotes=[];
+  let aiUsed=false;  // set once AI Macros produced an estimate for this entry
   const UNITS=['units','oz','g','lb','cup','tbsp','tsp','ml','slice'];
   document.getElementById('modal-root').innerHTML=`<div class="modal-overlay" id="modal-overlay"><div class="modal" style="max-height:88vh;overflow-y:auto">
     <div class="modal-title">Add Food / Meal</div>
@@ -1596,9 +1604,11 @@ function showAddFoodModal(){
         note(`<div style="background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:10px"><div style="font-size:13px;color:var(--text);font-weight:600;margin-bottom:8px">${esc(r.question)}</div><div style="display:flex;flex-wrap:wrap;gap:6px">${(r.options||[]).map((o,i)=>`<button class="btn btn-outline btn-xs" data-aiopt="${i}">${esc(o)}</button>`).join('')}</div></div>`);
         $('ai-status').querySelectorAll('[data-aiopt]').forEach(b=>b.addEventListener('click',()=>{ aiNotes.push(`${r.question} → ${r.options[+b.dataset.aiopt]}`); runAI(); }));
       } else if(r.type==='macros'){
+        aiUsed=true;
         $('f-cal').value=r.calories; $('f-pro').value=r.protein; $('f-carb').value=r.carbs; $('f-fat').value=r.fat;
         const detail=[r.basis,r.assumptions].filter(Boolean).map(esc).join(' · ');
-        note(`<div style="font-size:12px;color:var(--amber)">✨ AI estimate — verify before relying on it.${detail?`<div style="color:var(--text-muted);margin-top:2px">${detail}</div>`:''}</div>`);
+        const label=r.source==='cache'?'From saved data':'AI estimate';
+        note(`<div style="font-size:12px;color:var(--amber)">✨ ${label} — verify before relying on it.${detail?`<div style="color:var(--text-muted);margin-top:2px">${detail}</div>`:''}</div>`);
       } else { note(`<div style="font-size:12px;color:var(--text-muted)">Couldn't estimate — enter manually.</div>`); }
     }catch(err){ note(`<div style="font-size:12px;color:var(--text-muted)">AI unavailable — enter macros manually.</div>`); }
     btn.disabled=false;
@@ -1608,6 +1618,11 @@ function showAddFoodModal(){
   $('modal-save-food').addEventListener('click',()=>{
     const name=$('f-name').value.trim(); if(!name){ toast('Enter a food name','var(--red)'); return; }
     const entry={id:uid(),date:todayKey(),ts:Date.now(),name,calories:parseInt($('f-cal').value)||0,protein:parseFloat($('f-pro').value)||0,carbs:parseFloat($('f-carb').value)||0,fat:parseFloat($('f-fat').value)||0};
+    // Seed the shared cache with the user-accepted value (only for AI-assisted entries).
+    if(aiUsed && entry.calories>0){
+      const qty=parseFloat($('f-qty').value)||1, unit=$('f-unit').value;
+      aiMacrosRecord({food:name,qty,unit,clarification:aiNotes.join('; '),calories:entry.calories,protein:entry.protein,carbs:entry.carbs,fat:entry.fat});
+    }
     state.foodLog.push(entry); closeModal(); render(); dbAddFood(entry);
   });
 }
