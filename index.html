@@ -196,12 +196,40 @@ async function loadAdminMetrics(){
   _adminLoaded=true;
   try{
     const {data,error}=await sb.rpc('admin_metrics');
-    if(!error&&data){ state.adminMetrics=data; if(state.view==='more') render(); }
+    if(!error&&data){ state.adminMetrics=data; if(state.view==='admin') render(); }
     else _adminLoaded=false;  // allow a retry next time More opens (e.g. SQL not deployed yet)
   }catch(e){ _adminLoaded=false; }
 }
+// Dev notes live in Supabase (public read, owner-only write). Loaded for every
+// user so the More page shows them; falls back to the hardcoded DEV_NOTES below
+// if the table isn't present yet (e.g. before dev-notes-setup.sql is run).
+async function loadDevNotes(){
+  try{
+    const dn=await sb.from('dev_notes').select('id,note_date,title,body').order('created_at',{ascending:false});
+    if(!dn.error&&Array.isArray(dn.data))
+      state.devNotes=dn.data.map(r=>({id:r.id,date:r.note_date,title:r.title,body:r.body}));
+  }catch(e){ /* keep fallback */ }
+}
+function getDevNotes(){ return (state.devNotes&&state.devNotes.length)?state.devNotes:DEV_NOTES; }
+async function postDevNote(){
+  if(!isOwner()) return;
+  const v=id=>{ const e=document.getElementById(id); return e?e.value.trim():''; };
+  const note_date=v('note-date')||todayStamp(), title=v('note-title'), body=v('note-body');
+  if(!title||!body){ toast('Title and body are required','var(--red)'); return; }
+  const btn=document.getElementById('note-post-btn'); if(btn){ btn.disabled=true; btn.textContent='Publishing…'; }
+  const {error}=await sb.from('dev_notes').insert({note_date,title,body});
+  if(error){ toast('Post failed: '+error.message,'var(--red)'); if(btn){ btn.disabled=false; btn.textContent='Publish Note'; } return; }
+  await loadDevNotes(); toast('Note published'); render();
+}
+async function deleteDevNote(noteId){
+  if(!isOwner()||!noteId) return;
+  if(!confirm('Delete this note? This cannot be undone.')) return;
+  const {error}=await sb.from('dev_notes').delete().eq('id',noteId);
+  if(error){ toast('Delete failed: '+error.message,'var(--red)'); return; }
+  await loadDevNotes(); toast('Note deleted'); render();
+}
 
-const APP_VERSION = '2.17.0';
+const APP_VERSION = '2.18.0';
 const OWNER_UID     = '031a65ed-f52d-4a67-b271-47778e920c22';
 // Invite code from the URL (?invite=CODE) — drives the invite-only signup flow.
 let pendingInvite = new URLSearchParams(location.search).get('invite');
@@ -245,7 +273,7 @@ let state = {
   setType:'working',weight:45,reps:10,weightInc:5,repsInc:1,
   pendingSets:[],_currentSession:null,
   sessions:[],prs:{},favorites:[],customExercises:[],
-  historyTab:'plan', volumePeriod:'week', goal: localStorage.getItem('li_goal')||'hypertrophy', strengthRedMode: localStorage.getItem('li_str_red')||'fixed', planTargets:{hypertrophy:{},strength:{}}, adminMetrics:null,
+  historyTab:'plan', volumePeriod:'week', goal: localStorage.getItem('li_goal')||'hypertrophy', strengthRedMode: localStorage.getItem('li_str_red')||'fixed', planTargets:{hypertrophy:{},strength:{}}, adminMetrics:null, devNotes:null,
   weightView:'list', weightPeriod:'1m',
   nutritionView:'log', nutritionPeriod:'1m', calorieDisplay:'total',
   timer:{remaining:0,total:0,interval:null,running:false},
@@ -287,7 +315,7 @@ function resetAppState(){
   state.macroGoals={calories:2500,protein:180,carbs:250,fat:80};
   state.logStep='type'; state._currentSession=null; state.pendingSets=[]; state.view='log';
   swStop(); state.cardio={activity:null,stopwatch:{running:false,elapsed:0,interval:null},distance:'',distUnit:'mi',heartRate:null,hrTestStep:'idle',hrTestCountdown:0,hrTestInterval:null,hrBeats:''};
-  state.adminMetrics=null; _adminLoaded=false;
+  state.adminMetrics=null; _adminLoaded=false; state.devNotes=null;
 }
 
 async function loadUserData(){
@@ -323,6 +351,7 @@ async function loadUserData(){
     state.customExercises = ce.data || [];
     // Plan targets — loaded separately so a missing table never aborts the main data load.
     try{ const pg=await sb.from('plan_targets').select('targets').eq('user_id',userId).maybeSingle(); const raw=(pg.data&&pg.data.targets)||{}; state.planTargets=(raw.hypertrophy||raw.strength)?{hypertrophy:raw.hypertrophy||{},strength:raw.strength||{}}:{hypertrophy:raw,strength:{}}; }catch(e){ state.planTargets={hypertrophy:{},strength:{}}; }
+    await loadDevNotes();  // separate so a missing dev_notes table never aborts the main load
     console.log('Loaded — sessions:',state.sessions.length,'prs:',Object.keys(state.prs).length);
   } catch(err){
     console.error('loadUserData exception:',err);
@@ -555,7 +584,8 @@ function render(){
     <div class="view ${state.view==='nutrition'?'active':''}">${safeRender(renderNutrition,'Nutrition')}</div>
     <div class="view ${state.view==='bodyweight'?'active':''}">${safeRender(renderBodyweight,'Weight')}</div>
     <div class="view ${state.view==='history'?'active':''}">${safeRender(renderHistory,'History')}</div>
-    <div class="view ${state.view==='more'?'active':''}">${safeRender(renderMore,'More')}</div>`;
+    <div class="view ${state.view==='more'?'active':''}">${safeRender(renderMore,'More')}</div>
+    <div class="view ${state.view==='admin'?'active':''}">${state.view==='admin'?safeRender(renderAdmin,'Admin'):''}</div>`;
   attachEvents();
 }
 
@@ -1083,7 +1113,13 @@ function renderVolumeTab(){
 }
 
 // ── MORE ──────────────────────────────────────────────────────────────────────
-function devNoteHTML(n){ return `<div style="font-size:13px;color:var(--text-muted);line-height:1.55"><div style="font-weight:700;color:var(--text);margin-bottom:5px">${n.date} — ${n.title}</div>${n.body}<div style="text-align:right;margin-top:8px;font-weight:700;color:var(--text)">— Matt</div></div>`; }
+function devNoteHTML(n,admin){
+  // Owner-authored body is treated as HTML; a plain-text body (no tags) gets its
+  // line breaks preserved and is escaped for safety.
+  const body = /</.test(n.body||'') ? n.body : esc(n.body).replace(/\n/g,'<br>');
+  const del = admin&&n.id ? `<button class="dev-note-del" data-id="${esc(n.id)}" style="background:none;border:none;color:var(--red);font-size:12px;cursor:pointer;text-decoration:underline;padding:0">Delete</button>` : '';
+  return `<div style="font-size:13px;color:var(--text-muted);line-height:1.55"><div style="font-weight:700;color:var(--text);margin-bottom:5px">${esc(n.date)} — ${esc(n.title)}</div>${body}<div style="display:flex;justify-content:${del?'space-between':'flex-end'};align-items:center;margin-top:8px">${del}<span style="font-weight:700;color:var(--text)">— Matt</span></div></div>`;
+}
 const DEV_NOTES=[
   {date:'6/19/2026',title:'Strength goals',body:`Building on the volume planning, I added a Training Goal toggle to the Plan tab: Hypertrophy, Strength, or Off. Hypertrophy is the volume-first view we already had. Strength works differently — since strength is driven more by heavy load than by total volume, this mode only counts your heavy sets (6 reps or fewer) toward each muscle's weekly target, and the "too much" thresholds come down accordingly. You set separate targets for each goal, so switching between them shows the right numbers. Off turns the whole volume system back off for a clean, simple log. Just note: the hypertrophy set ranges are well supported by research, but the strength thresholds are more of a sensible guideline than settled science — take those as a starting point.
         <div style="margin-top:8px">Citations:</div>
@@ -1097,22 +1133,49 @@ const DEV_NOTES=[
   {date:'6/18/2026',title:'Nutrition update',body:`I have removed the search function from the nutrition area. The search pulled from a USDA database and I found the results very unclean and difficult to work with. Searching for "Chicken wings" would pull up 50 results from a myriad of chicken wing brands, and the experience was just... kluged. For now, the original experience is in place. You just name the food and input the macro information manually. I'll continue to work on alternatives. In the meantime, I find it easy to enter a new food and run a quick google search for "[food name] nutrition" and that returns solid results.`},
 ];
 function showAllUpdates(){
-  document.getElementById('modal-root').innerHTML=`<div class="modal-overlay" id="modal-overlay"><div class="modal" style="max-height:88vh;overflow-y:auto"><div class="modal-title">Release Notes &amp; Dev Updates</div>${DEV_NOTES.map(devNoteHTML).join('<hr class="divider" style="margin:14px 0">')}<button class="btn btn-outline btn-full" id="modal-cancel" style="margin-top:10px">Close</button></div></div>`;
+  document.getElementById('modal-root').innerHTML=`<div class="modal-overlay" id="modal-overlay"><div class="modal" style="max-height:88vh;overflow-y:auto"><div class="modal-title">Release Notes &amp; Dev Updates</div>${getDevNotes().map(n=>devNoteHTML(n)).join('<hr class="divider" style="margin:14px 0">')}<button class="btn btn-outline btn-full" id="modal-cancel" style="margin-top:10px">Close</button></div></div>`;
   document.getElementById('modal-cancel').addEventListener('click',closeModal);
   document.getElementById('modal-overlay').addEventListener('click',e=>{ if(e.target===e.currentTarget) closeModal(); });
 }
-function adminCardHTML(){
-  if(!isOwner()) return '';
+function todayStamp(){ const d=new Date(); return `${d.getMonth()+1}/${d.getDate()}/${d.getFullYear()}`; }
+// Owner-only Admin area: user metrics + a composer to publish dev notes live.
+// Gated client-side on isOwner(); the data and writes are independently locked
+// server-side (admin_metrics() + dev_notes RLS), so this is unreachable to
+// anyone else even if the client check is bypassed.
+function renderAdmin(){
+  if(!isOwner()){ state.view='more'; return ''; }
+  loadAdminMetrics();
   const m=state.adminMetrics;
   const stat=(v,l)=>`<div><div style="font-size:26px;font-weight:800;color:var(--text);line-height:1.1">${v}</div><div style="font-size:11px;color:var(--text-muted);margin-top:2px">${l}</div></div>`;
-  return `<div class="card">
-      <div class="card-title">Admin · Users</div>
+  const notes=getDevNotes();
+  const ta='min-height:120px;resize:vertical;font-size:14px;padding:10px 12px;border-radius:var(--radius-sm);width:100%;background:var(--surface2);border:1px solid var(--border);color:var(--text)';
+  return `
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px">
+      <button class="btn btn-outline" id="admin-back-btn" style="width:auto;padding:6px 12px;font-size:13px">← More</button>
+      <div class="page-title" style="margin:0">Admin</div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">Users</div>
       ${m?`<div style="display:flex;gap:24px;flex-wrap:wrap">${stat(m.users??'—','Registered')}${stat(m.confirmed??'—','Confirmed')}${stat(m.new_7d??'—','New · 7d')}</div>`
          :`<div style="font-size:13px;color:var(--text-muted)">Loading…</div>`}
+    </div>
+
+    <div class="card">
+      <div class="card-title">Post Dev Note</div>
+      <div class="field"><label>Date</label><input type="text" id="note-date" value="${esc(todayStamp())}" placeholder="6/20/2026"></div>
+      <div class="field"><label>Title</label><input type="text" id="note-title" placeholder="What's new"></div>
+      <div class="field"><label>Body</label><textarea id="note-body" placeholder="Describe the update…" style="${ta}"></textarea></div>
+      <button class="btn btn-primary btn-full" id="note-post-btn" style="margin-top:4px">Publish Note</button>
+      <div style="font-size:12px;color:var(--text-muted);margin-top:8px">Publishes immediately to the More page for everyone. Plain text keeps its line breaks; basic HTML is allowed for links (e.g. <code>&lt;a href="…"&gt;</code>).</div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">Published Notes (${notes.length})</div>
+      ${notes.length===0?'<div class="empty">No notes yet.</div>':notes.map(n=>devNoteHTML(n,true)).join('<hr class="divider" style="margin:14px 0">')}
     </div>`;
 }
 function renderMore(){
-  loadAdminMetrics();
   return `
     <div style="display:flex;align-items:baseline;justify-content:space-between"><div class="page-title">More</div>${versionStamp()}</div>
 
@@ -1122,7 +1185,11 @@ function renderMore(){
       <button class="btn btn-outline btn-full" id="update-password-btn">Update Password</button>
     </div>
 
-    ${adminCardHTML()}
+    ${isOwner()?`<div class="card">
+      <div class="card-title">Admin</div>
+      <div style="font-size:13px;color:var(--text-muted);margin-bottom:12px">User metrics and dev-note publishing.</div>
+      <button class="btn btn-primary btn-full" id="open-admin-btn">Open Admin</button>
+    </div>`:''}
 
     <div class="card">
       <div class="card-title">Appearance</div>
@@ -1157,8 +1224,8 @@ function renderMore(){
 
     <div class="card">
       <div class="card-title">Release Notes &amp; Dev Updates</div>
-      ${devNoteHTML(DEV_NOTES[0])}
-      ${DEV_NOTES.length>1?`<button class="btn btn-outline btn-full" id="view-updates-btn" style="margin-top:12px">View all updates (${DEV_NOTES.length})</button>`:''}
+      ${devNoteHTML(getDevNotes()[0])}
+      ${getDevNotes().length>1?`<button class="btn btn-outline btn-full" id="view-updates-btn" style="margin-top:12px">View all updates (${getDevNotes().length})</button>`:''}
     </div>
 
     <button class="btn btn-outline btn-sm btn-full" id="logout-btn">Sign Out</button>
@@ -1280,6 +1347,12 @@ function attachEvents(){
   document.querySelectorAll('[data-theme]').forEach(b=>b.addEventListener('click',()=>{ setTheme(b.dataset.theme); render(); }));
   el('delete-account-btn',  ()=>{ showDeleteAccountModal(); });
   el('view-updates-btn', showAllUpdates);
+
+  // Admin area (owner only)
+  el('open-admin-btn', ()=>{ if(isOwner()){ state.view='admin'; render(); } });
+  el('admin-back-btn', ()=>{ state.view='more'; render(); });
+  el('note-post-btn', postDevNote);
+  document.querySelectorAll('.dev-note-del').forEach(b=>b.addEventListener('click',()=>deleteDevNote(b.dataset.id)));
   el('show-privacy-btn', ()=>showPolicyModal('Privacy Policy', PRIVACY_POLICY));
   el('show-tos-btn',     ()=>showPolicyModal('Terms of Service', TERMS_OF_SERVICE));
   el('support-submit-btn', ()=>{ submitSupportMessage(); });
