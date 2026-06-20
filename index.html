@@ -89,6 +89,7 @@ select:focus,input:focus{outline:none;border-color:var(--accent)}
 .muscle-grid{display:grid;grid-template-columns:1fr 1fr;gap:9px}
 .muscle-btn{background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:14px 10px;text-align:center;font-size:14px;font-weight:700;color:var(--text);cursor:pointer;transition:border-color .15s,background .15s}
 .muscle-btn:active{border-color:var(--accent);background:var(--accent-dim)}
+.mbtn-bar{height:5px;border-radius:3px;background:var(--border);overflow:hidden;margin-top:8px}
 .exercise-list{display:flex;flex-direction:column;gap:8px}
 .exercise-item{background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:12px 14px;display:flex;align-items:center;justify-content:space-between;cursor:pointer}
 .exercise-item:active{border-color:var(--accent)}
@@ -185,7 +186,7 @@ function toggleTheme(){ setTheme(state.theme==='light'?'dark':'light'); render()
 function versionStamp(){ return `<div style="display:flex;align-items:center;gap:6px"><div style="font-size:10px;color:var(--text-muted);font-weight:600">v${APP_VERSION}</div><button onclick="toggleTheme()" title="Toggle light/dark mode" aria-label="Toggle light/dark mode" style="background:none;border:none;cursor:pointer;font-size:14px;line-height:1;padding:0;color:var(--text-muted)">${state.theme==='light'?'🌙':'☀️'}</button></div>`; }
 function isOwner(){ return currentUser?.id === OWNER_UID; }
 
-const APP_VERSION = '2.14.2';
+const APP_VERSION = '2.14.3';
 const OWNER_UID     = '031a65ed-f52d-4a67-b271-47778e920c22';
 // Invite code from the URL (?invite=CODE) — drives the invite-only signup flow.
 let pendingInvite = new URLSearchParams(location.search).get('invite');
@@ -565,13 +566,14 @@ function renderLog(){
 
 function renderWorkoutScreen(){
   const hasSets=state._currentSession?.exercises?.length;
+  const counts=weeklySetCounts();
   return `
     <div style="display:flex;align-items:baseline;justify-content:space-between"><div class="page-title">Log Workout</div>${versionStamp()}</div>
     <div class="subtitle">${fmtDate(Date.now())}</div>
     ${hasSets?`<div style="background:var(--accent-dim);border:1px solid var(--accent);border-radius:var(--radius-sm);padding:10px 14px;font-size:13px;color:var(--accent);font-weight:700">↩ Resuming ${fmtDate(state._currentSession.date)} — ${state._currentSession.exercises.length} exercise${state._currentSession.exercises.length!==1?'s':''} logged. Add more or finish.</div>`:''}
     <div>
       <div class="card-title" style="margin-bottom:10px">Strength Training</div>
-      <div class="muscle-grid">${Object.keys(GROUPS).map(g=>`<button class="muscle-btn" data-group="${g}">${g}</button>`).join('')}</div>
+      <div class="muscle-grid">${Object.keys(GROUPS).map(g=>`<button class="muscle-btn" data-group="${g}">${g}${volBar(counts,GROUPS[g])}</button>`).join('')}</div>
     </div>
     <div>
       <div class="card-title" style="margin-bottom:10px">Cardio</div>
@@ -582,13 +584,14 @@ function renderWorkoutScreen(){
 
 function renderGroupMuscleSelect(){
   const muscles=GROUPS[state.selectedGroup]||[];
+  const counts=weeklySetCounts();
   return `
     <div style="display:flex;align-items:center;gap:10px">
       <button class="btn btn-outline btn-sm" id="back-workout">← Back</button>
       <div class="page-title" style="font-size:20px">${state.selectedGroup}</div>
     </div>
     <div class="card"><div class="card-title">Select Muscle</div>
-      <div class="muscle-grid">${muscles.map(m=>`<button class="muscle-btn" data-muscle="${m}">${m}</button>`).join('')}</div>
+      <div class="muscle-grid">${muscles.map(m=>`<button class="muscle-btn" data-muscle="${m}">${m}${volBar(counts,[m])}</button>`).join('')}</div>
     </div>`;
 }
 
@@ -965,6 +968,15 @@ let _planSaveTimer=null;
 function schedulePlanSave(){ clearTimeout(_planSaveTimer); _planSaveTimer=setTimeout(dbSavePlan,600); }
 async function dbSavePlan(){ const {error}=await sb.from('plan_targets').upsert({user_id:currentUser.id,targets:state.planTargets,updated_at:new Date().toISOString()},{onConflict:'user_id'}); if(error) toast('Could not save plan','var(--red)'); }
 function volumeColor(n){ return n>20?'var(--red)':n>=18?'#f97316':n>=12?'var(--amber)':'var(--accent)'; }
+// Mini progress bar for a workout button. muscles = [m] for one muscle, or a group's muscle list.
+function volBar(counts, muscles){
+  const tgts=state.planTargets||{}; let sets=0, tgt=0;
+  muscles.forEach(m=>{ sets+=counts[m]||0; tgt+=parseInt(tgts[m])||0; });
+  const ref=tgt>0?tgt:muscles.length*20;
+  const pct=ref>0?Math.min(100,Math.round(sets/ref*100)):0;
+  const color=volumeColor(sets/Math.max(1,muscles.length));
+  return `<div class="mbtn-bar"><div style="height:100%;width:${pct}%;background:${color}"></div></div>`;
+}
 function renderPlanTab(){
   const actual=weeklySetCounts(), t=state.planTargets||{};
   const lg=(c,l)=>`<span style="display:inline-flex;align-items:center;gap:4px"><span style="display:inline-block;width:9px;height:9px;border-radius:2px;background:${c}"></span>${l}</span>`;
