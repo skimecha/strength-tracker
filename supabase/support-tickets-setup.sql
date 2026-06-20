@@ -51,6 +51,13 @@ create policy support_messages_owner_delete on public.support_messages
   for delete to authenticated
   using (auth.uid() = '031a65ed-f52d-4a67-b271-47778e920c22');
 
+-- Table-level privileges. RLS decides WHICH rows; the role still needs the base
+-- grant on the table or every query fails with "permission denied for table"
+-- (42501). The table was created by hand and only had INSERT granted (so the
+-- support form worked but reads/updates/deletes did not). RLS above is what
+-- actually restricts these to the owner — these grants just open the gate.
+grant select, insert, update, delete on public.support_messages to authenticated;
+
 notify pgrst, 'reload schema';
 
 -- Sanity check — after running, this should list ONLY the four policies above:
