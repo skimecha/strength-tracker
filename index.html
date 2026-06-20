@@ -186,7 +186,7 @@ function toggleTheme(){ setTheme(state.theme==='light'?'dark':'light'); render()
 function versionStamp(){ return `<div style="display:flex;align-items:center;gap:6px"><div style="font-size:10px;color:var(--text-muted);font-weight:600">v${APP_VERSION}</div><button onclick="toggleTheme()" title="Toggle light/dark mode" aria-label="Toggle light/dark mode" style="background:none;border:none;cursor:pointer;font-size:14px;line-height:1;padding:0;color:var(--text-muted)">${state.theme==='light'?'🌙':'☀️'}</button></div>`; }
 function isOwner(){ return currentUser?.id === OWNER_UID; }
 
-const APP_VERSION = '2.15.0';
+const APP_VERSION = '2.15.1';
 const OWNER_UID     = '031a65ed-f52d-4a67-b271-47778e920c22';
 // Invite code from the URL (?invite=CODE) — drives the invite-only signup flow.
 let pendingInvite = new URLSearchParams(location.search).get('invite');
@@ -970,7 +970,7 @@ function goalUpper(){ return state.goal==='strength'?12:20; }
 let _planSaveTimer=null;
 function schedulePlanSave(){ clearTimeout(_planSaveTimer); _planSaveTimer=setTimeout(dbSavePlan,600); }
 async function dbSavePlan(){ const {error}=await sb.from('plan_targets').upsert({user_id:currentUser.id,targets:state.planTargets,updated_at:new Date().toISOString()},{onConflict:'user_id'}); if(error) toast('Could not save plan','var(--red)'); }
-function volumeColor(n, goal){ goal=goal||state.goal; if(goal==='strength') return n>12?'var(--red)':n>=10?'#f97316':n>=6?'var(--amber)':'var(--accent)'; return n>20?'var(--red)':n>=18?'#f97316':n>=12?'var(--amber)':'var(--accent)'; }
+function volumeColor(n, goal){ goal=goal||state.goal; if(goal==='strength') return n>12?'var(--red)':n>=10?'#f97316':n>=6?'#eab308':'var(--accent)'; return n>20?'var(--red)':n>=18?'#f97316':n>=12?'#eab308':'var(--accent)'; }
 // Mini progress bar for a workout button. muscles = [m] for one muscle, or a group's muscle list. Hidden when goal is 'off'.
 function volBar(counts, muscles){
   if(state.goal==='off') return '';
@@ -996,8 +996,8 @@ function renderPlanTab(){
     ? `Set a weekly target for <b style="color:var(--text)">heavy sets (≤6 reps)</b> per muscle. Strength favors fewer, heavier sets — these thresholds are a practical guideline, not a hard rule.`
     : `Set a weekly working-set target per muscle. Research suggests roughly <b style="color:var(--text)">10–20 hard sets per muscle per week</b> for growth.`;
   const legend=strength
-    ? `${lg('var(--accent)','0–6')}${lg('var(--amber)','6–10')}${lg('#f97316','10–12')}${lg('var(--red)','12+')}`
-    : `${lg('var(--accent)','0–12')}${lg('var(--amber)','12–18')}${lg('#f97316','18–20')}${lg('var(--red)','20+')}`;
+    ? `${lg('var(--accent)','0–6')}${lg('#eab308','6–10')}${lg('#f97316','10–12')}${lg('var(--red)','12+')}`
+    : `${lg('var(--accent)','0–12')}${lg('#eab308','12–18')}${lg('#f97316','18–20')}${lg('var(--red)','20+')}`;
   return toggle+`
     <div style="font-size:12px;color:var(--text-muted);margin-bottom:6px;line-height:1.5">${intro} Progress is for this week and resets Monday.</div>
     <div style="display:flex;flex-wrap:wrap;gap:12px;font-size:11px;color:var(--text-muted);margin-bottom:8px">${legend}</div>
