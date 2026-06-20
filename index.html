@@ -186,7 +186,7 @@ function toggleTheme(){ setTheme(state.theme==='light'?'dark':'light'); render()
 function versionStamp(){ return `<div style="display:flex;align-items:center;gap:6px"><div style="font-size:10px;color:var(--text-muted);font-weight:600">v${APP_VERSION}</div><button onclick="toggleTheme()" title="Toggle light/dark mode" aria-label="Toggle light/dark mode" style="background:none;border:none;cursor:pointer;font-size:14px;line-height:1;padding:0;color:var(--text-muted)">${state.theme==='light'?'🌙':'☀️'}</button></div>`; }
 function isOwner(){ return currentUser?.id === OWNER_UID; }
 
-const APP_VERSION = '2.16.0';
+const APP_VERSION = '2.16.1';
 const OWNER_UID     = '031a65ed-f52d-4a67-b271-47778e920c22';
 // Invite code from the URL (?invite=CODE) — drives the invite-only signup flow.
 let pendingInvite = new URLSearchParams(location.search).get('invite');
@@ -971,6 +971,19 @@ let _planSaveTimer=null;
 function schedulePlanSave(){ clearTimeout(_planSaveTimer); _planSaveTimer=setTimeout(dbSavePlan,600); }
 async function dbSavePlan(){ const {error}=await sb.from('plan_targets').upsert({user_id:currentUser.id,targets:state.planTargets,updated_at:new Date().toISOString()},{onConflict:'user_id'}); if(error) toast('Could not save plan','var(--red)'); }
 function volumeColor(n, goal){ goal=goal||state.goal; if(goal==='strength') return n>12?'var(--red)':n>=10?'#f97316':n>=6?'#eab308':'var(--accent)'; return n>20?'var(--red)':n>=18?'#f97316':n>=12?'#eab308':'var(--accent)'; }
+// Segmented progress bar — the filled portion is colored by which volume band
+// each slice of sets falls into (blue 0–12, gold 12–18, orange 18–20, red 20+,
+// scaled down for strength), so one bar shows the whole journey through the
+// thresholds. The unfilled track runs toward the target (ref).
+function volumeSegBar(did, ref, goal){
+  goal=goal||state.goal;
+  const bands=goal==='strength'
+    ? [[0,6,'var(--accent)'],[6,10,'#eab308'],[10,12,'#f97316'],[12,1e9,'var(--red)']]
+    : [[0,12,'var(--accent)'],[12,18,'#eab308'],[18,20,'#f97316'],[20,1e9,'var(--red)']];
+  const scale=Math.max(ref,did,1);
+  const segs=bands.map(([lo,hi,c])=>{ const a=Math.max(lo,0), b=Math.min(hi,did); return b>a?`<div style="height:100%;width:${(b-a)/scale*100}%;background:${c}"></div>`:''; }).join('');
+  return `<div class="macro-bar-wrap" style="display:flex">${segs}</div>`;
+}
 // Mini progress bar for a workout button. muscles = [m] for one muscle, or a group's muscle list. Hidden when goal is 'off'.
 function volBar(counts, muscles){
   if(state.goal==='off') return '';
@@ -1005,11 +1018,11 @@ function renderPlanTab(){
       <div class="card">
         <div class="card-title">${group}</div>
         <div class="section-gap">
-          ${muscles.map(m=>{ const did=actual[m]||0, tgt=parseInt(t[m])||0, pct=tgt>0?Math.min(100,Math.round(did/tgt*100)):0, met=tgt>0&&did>=tgt;
+          ${muscles.map(m=>{ const did=actual[m]||0, tgt=parseInt(t[m])||0, met=tgt>0&&did>=tgt;
             return `<div style="display:flex;align-items:center;gap:12px">
               <div style="flex:1;min-width:0">
                 <div style="display:flex;justify-content:space-between;align-items:baseline;gap:8px"><span style="font-size:14px;font-weight:700;color:var(--text)">${esc(m)}</span><span style="font-size:12px;color:${met?'var(--green)':'var(--text-muted)'}">${did}${tgt?` / ${tgt}`:''} sets${met?' ✓':''}</span></div>
-                <div class="macro-bar-wrap"><div class="macro-bar" style="width:${pct}%;background:${volumeColor(did)}"></div></div>
+                ${volumeSegBar(did, tgt>0?tgt:goalUpper())}
               </div>
               <input type="number" min="0" step="1" value="${tgt||''}" placeholder="—" data-plan-muscle="${esc(m)}" aria-label="${esc(m)} weekly set target" style="width:56px;text-align:center;padding:8px 4px;font-size:15px;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);flex-shrink:0">
             </div>`; }).join('')}
