@@ -238,9 +238,14 @@ async function loadSupportTickets(force){
   if(_supportLoaded&&!force) return;
   _supportLoaded=true; state.supportError=null;
   try{
-    const r=await sb.from('support_messages').select('id,user_id,email,message,resolved,created_at').order('created_at',{ascending:false});
+    // select('*') + client-side sort so a briefly-stale PostgREST schema cache
+    // (e.g. right after adding the created_at/resolved columns) can't error out
+    // a server-side .order() on a column it hasn't picked up yet.
+    const r=await sb.from('support_messages').select('*');
     if(r.error) throw r.error;
-    state.supportTickets=Array.isArray(r.data)?r.data:[];
+    const rows=Array.isArray(r.data)?r.data.slice():[];
+    rows.sort((a,b)=>new Date(b.created_at||0)-new Date(a.created_at||0));
+    state.supportTickets=rows;
   }catch(e){
     _supportLoaded=false;
     state.supportError=(e&&(e.message||e.hint||e.code))||'Unknown error';
