@@ -185,7 +185,7 @@ function toggleTheme(){ setTheme(state.theme==='light'?'dark':'light'); render()
 function versionStamp(){ return `<div style="display:flex;align-items:center;gap:6px"><div style="font-size:10px;color:var(--text-muted);font-weight:600">v${APP_VERSION}</div><button onclick="toggleTheme()" title="Toggle light/dark mode" aria-label="Toggle light/dark mode" style="background:none;border:none;cursor:pointer;font-size:14px;line-height:1;padding:0;color:var(--text-muted)">${state.theme==='light'?'🌙':'☀️'}</button></div>`; }
 function isOwner(){ return currentUser?.id === OWNER_UID; }
 
-const APP_VERSION = '2.14.1';
+const APP_VERSION = '2.14.2';
 const OWNER_UID     = '031a65ed-f52d-4a67-b271-47778e920c22';
 // Invite code from the URL (?invite=CODE) — drives the invite-only signup flow.
 let pendingInvite = new URLSearchParams(location.search).get('invite');
@@ -964,10 +964,13 @@ function weeklySetCounts(){
 let _planSaveTimer=null;
 function schedulePlanSave(){ clearTimeout(_planSaveTimer); _planSaveTimer=setTimeout(dbSavePlan,600); }
 async function dbSavePlan(){ const {error}=await sb.from('plan_targets').upsert({user_id:currentUser.id,targets:state.planTargets,updated_at:new Date().toISOString()},{onConflict:'user_id'}); if(error) toast('Could not save plan','var(--red)'); }
+function volumeColor(n){ return n>20?'var(--red)':n>=18?'#f97316':n>=12?'var(--amber)':'var(--accent)'; }
 function renderPlanTab(){
   const actual=weeklySetCounts(), t=state.planTargets||{};
+  const lg=(c,l)=>`<span style="display:inline-flex;align-items:center;gap:4px"><span style="display:inline-block;width:9px;height:9px;border-radius:2px;background:${c}"></span>${l}</span>`;
   return `
-    <div style="font-size:12px;color:var(--text-muted);margin-bottom:2px;line-height:1.5">Set a weekly working-set target per muscle. Progress is for this week and resets Monday. Research suggests roughly <b style="color:var(--text)">10–20 hard sets per muscle per week</b> for growth.</div>
+    <div style="font-size:12px;color:var(--text-muted);margin-bottom:6px;line-height:1.5">Set a weekly working-set target per muscle. Progress is for this week and resets Monday. Research suggests roughly <b style="color:var(--text)">10–20 hard sets per muscle per week</b> for growth.</div>
+    <div style="display:flex;flex-wrap:wrap;gap:12px;font-size:11px;color:var(--text-muted);margin-bottom:8px">${lg('var(--accent)','0–12')}${lg('var(--amber)','12–18')}${lg('#f97316','18–20')}${lg('var(--red)','20+')}</div>
     ${Object.entries(GROUPS).map(([group,muscles])=>`
       <div class="card">
         <div class="card-title">${group}</div>
@@ -976,7 +979,7 @@ function renderPlanTab(){
             return `<div style="display:flex;align-items:center;gap:12px">
               <div style="flex:1;min-width:0">
                 <div style="display:flex;justify-content:space-between;align-items:baseline;gap:8px"><span style="font-size:14px;font-weight:700;color:var(--text)">${esc(m)}</span><span style="font-size:12px;color:${met?'var(--green)':'var(--text-muted)'}">${did}${tgt?` / ${tgt}`:''} sets${met?' ✓':''}</span></div>
-                <div class="macro-bar-wrap"><div class="macro-bar" style="width:${pct}%;background:${met?'var(--green)':'var(--accent)'}"></div></div>
+                <div class="macro-bar-wrap"><div class="macro-bar" style="width:${pct}%;background:${volumeColor(did)}"></div></div>
               </div>
               <input type="number" min="0" step="1" value="${tgt||''}" placeholder="—" data-plan-muscle="${esc(m)}" aria-label="${esc(m)} weekly set target" style="width:56px;text-align:center;padding:8px 4px;font-size:15px;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);flex-shrink:0">
             </div>`; }).join('')}
