@@ -228,8 +228,36 @@ async function deleteDevNote(noteId){
   if(error){ toast('Delete failed: '+error.message,'var(--red)'); return; }
   await loadDevNotes(); toast('Note deleted'); render();
 }
+// Support tickets — owner-only read/triage. Server-locked by RLS (only the
+// owner UID can select/update/delete support_messages), so this is unreachable
+// to anyone else even if the client gate is bypassed. See
+// supabase/support-tickets-setup.sql.
+let _supportLoaded=false;
+async function loadSupportTickets(force){
+  if(!isOwner()) return;
+  if(_supportLoaded&&!force) return;
+  _supportLoaded=true;
+  try{
+    const r=await sb.from('support_messages').select('id,user_id,email,message,resolved,created_at').order('created_at',{ascending:false});
+    if(!r.error&&Array.isArray(r.data)){ state.supportTickets=r.data; if(state.view==='support'||state.view==='admin') render(); }
+    else _supportLoaded=false;
+  }catch(e){ _supportLoaded=false; }
+}
+async function setTicketResolved(id,val){
+  if(!isOwner()||!id) return;
+  const {error}=await sb.from('support_messages').update({resolved:val}).eq('id',id);
+  if(error){ toast('Update failed: '+error.message,'var(--red)'); return; }
+  await loadSupportTickets(true); toast(val?'Marked resolved':'Reopened'); render();
+}
+async function deleteTicket(id){
+  if(!isOwner()||!id) return;
+  if(!confirm('Delete this ticket? This cannot be undone.')) return;
+  const {error}=await sb.from('support_messages').delete().eq('id',id);
+  if(error){ toast('Delete failed: '+error.message,'var(--red)'); return; }
+  await loadSupportTickets(true); toast('Ticket deleted'); render();
+}
 
-const APP_VERSION = '2.18.0';
+const APP_VERSION = '2.19.0';
 const OWNER_UID     = '031a65ed-f52d-4a67-b271-47778e920c22';
 // Invite code from the URL (?invite=CODE) — drives the invite-only signup flow.
 let pendingInvite = new URLSearchParams(location.search).get('invite');
@@ -273,7 +301,7 @@ let state = {
   setType:'working',weight:45,reps:10,weightInc:5,repsInc:1,
   pendingSets:[],_currentSession:null,
   sessions:[],prs:{},favorites:[],customExercises:[],
-  historyTab:'plan', volumePeriod:'week', goal: localStorage.getItem('li_goal')||'hypertrophy', strengthRedMode: localStorage.getItem('li_str_red')||'fixed', planTargets:{hypertrophy:{},strength:{}}, adminMetrics:null, devNotes:null,
+  historyTab:'plan', volumePeriod:'week', goal: localStorage.getItem('li_goal')||'hypertrophy', strengthRedMode: localStorage.getItem('li_str_red')||'fixed', planTargets:{hypertrophy:{},strength:{}}, adminMetrics:null, devNotes:null, supportTickets:null,
   weightView:'list', weightPeriod:'1m',
   nutritionView:'log', nutritionPeriod:'1m', calorieDisplay:'total',
   timer:{remaining:0,total:0,interval:null,running:false},
@@ -315,7 +343,7 @@ function resetAppState(){
   state.macroGoals={calories:2500,protein:180,carbs:250,fat:80};
   state.logStep='type'; state._currentSession=null; state.pendingSets=[]; state.view='log';
   swStop(); state.cardio={activity:null,stopwatch:{running:false,elapsed:0,interval:null},distance:'',distUnit:'mi',heartRate:null,hrTestStep:'idle',hrTestCountdown:0,hrTestInterval:null,hrBeats:''};
-  state.adminMetrics=null; _adminLoaded=false; state.devNotes=null;
+  state.adminMetrics=null; _adminLoaded=false; state.devNotes=null; state.supportTickets=null; _supportLoaded=false;
 }
 
 async function loadUserData(){
@@ -585,7 +613,8 @@ function render(){
     <div class="view ${state.view==='bodyweight'?'active':''}">${safeRender(renderBodyweight,'Weight')}</div>
     <div class="view ${state.view==='history'?'active':''}">${safeRender(renderHistory,'History')}</div>
     <div class="view ${state.view==='more'?'active':''}">${safeRender(renderMore,'More')}</div>
-    <div class="view ${state.view==='admin'?'active':''}">${state.view==='admin'?safeRender(renderAdmin,'Admin'):''}</div>`;
+    <div class="view ${state.view==='admin'?'active':''}">${state.view==='admin'?safeRender(renderAdmin,'Admin'):''}</div>
+    <div class="view ${state.view==='support'?'active':''}">${state.view==='support'?safeRender(renderSupport,'Support'):''}</div>`;
   attachEvents();
 }
 
@@ -1138,6 +1167,50 @@ function showAllUpdates(){
   document.getElementById('modal-overlay').addEventListener('click',e=>{ if(e.target===e.currentTarget) closeModal(); });
 }
 function todayStamp(){ const d=new Date(); return `${d.getMonth()+1}/${d.getDate()}/${d.getFullYear()}`; }
+function openTicketBadge(){
+  const t=state.supportTickets; if(!t) return '';
+  const open=t.filter(x=>!x.resolved).length;
+  return open ? ` · <b style="color:var(--accent)">${open} open</b>` : ' · all clear ✓';
+}
+function ticketTime(ts){ try{ return new Date(ts).toLocaleString([], {month:'short',day:'numeric',year:'numeric',hour:'numeric',minute:'2-digit'}); }catch(e){ return ''; } }
+function ticketHTML(t){
+  const when=t.created_at?ticketTime(t.created_at):'';
+  const who=t.email?esc(t.email):'<i>anonymous</i>';
+  const badge=t.resolved
+    ?'<span style="font-size:11px;font-weight:800;color:var(--green);background:var(--green-dim);padding:2px 8px;border-radius:10px">Resolved</span>'
+    :'<span style="font-size:11px;font-weight:800;color:var(--accent);background:var(--surface2);padding:2px 8px;border-radius:10px">Open</span>';
+  return `<div style="padding:2px 0">
+    <div style="display:flex;align-items:baseline;justify-content:space-between;gap:8px;margin-bottom:4px">
+      <span style="font-size:13px;font-weight:700;color:var(--text);word-break:break-all">${who}</span>${badge}
+    </div>
+    <div style="font-size:11px;color:var(--text-muted);margin-bottom:8px">${esc(when)}</div>
+    <div style="font-size:14px;color:var(--text);line-height:1.5;white-space:pre-wrap;word-break:break-word">${esc(t.message||'')}</div>
+    <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:10px">
+      <button class="btn btn-outline ticket-resolve" data-id="${esc(t.id)}" data-val="${t.resolved?'0':'1'}" style="width:auto;padding:5px 12px;font-size:12px">${t.resolved?'Reopen':'Mark resolved'}</button>
+      <button class="ticket-del" data-id="${esc(t.id)}" style="background:none;border:none;color:var(--red);font-size:12px;cursor:pointer;text-decoration:underline">Delete</button>
+    </div>
+  </div>`;
+}
+function renderSupport(){
+  if(!isOwner()){ state.view='more'; return ''; }
+  loadSupportTickets();
+  const t=state.supportTickets;
+  const open=t?t.filter(x=>!x.resolved):[];
+  const done=t?t.filter(x=>x.resolved):[];
+  let body;
+  if(t===null) body='<div class="card"><div style="font-size:13px;color:var(--text-muted)">Loading…</div></div>';
+  else if(t.length===0) body='<div class="empty">No support messages yet.</div>';
+  else body=`
+    <div style="font-size:12px;color:var(--text-muted);text-align:center;margin:2px 0 8px">${open.length} open · ${done.length} resolved</div>
+    ${open.length?`<div class="card"><div class="section-gap">${open.map(ticketHTML).join('<hr class="divider" style="margin:14px 0">')}</div></div>`:''}
+    ${done.length?`<div class="card-title" style="margin:14px 0 8px">Resolved</div><div class="card"><div class="section-gap" style="opacity:.7">${done.map(ticketHTML).join('<hr class="divider" style="margin:14px 0">')}</div></div>`:''}`;
+  return `
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px">
+      <button class="btn btn-outline" id="support-back-btn" style="width:auto;padding:6px 12px;font-size:13px">← Admin</button>
+      <div class="page-title" style="margin:0">Support Tickets</div>
+    </div>
+    ${body}`;
+}
 // Owner-only Admin area: user metrics + a composer to publish dev notes live.
 // Gated client-side on isOwner(); the data and writes are independently locked
 // server-side (admin_metrics() + dev_notes RLS), so this is unreachable to
@@ -1145,6 +1218,7 @@ function todayStamp(){ const d=new Date(); return `${d.getMonth()+1}/${d.getDate
 function renderAdmin(){
   if(!isOwner()){ state.view='more'; return ''; }
   loadAdminMetrics();
+  loadSupportTickets();
   const m=state.adminMetrics;
   const stat=(v,l)=>`<div><div style="font-size:26px;font-weight:800;color:var(--text);line-height:1.1">${v}</div><div style="font-size:11px;color:var(--text-muted);margin-top:2px">${l}</div></div>`;
   const notes=getDevNotes();
@@ -1159,6 +1233,12 @@ function renderAdmin(){
       <div class="card-title">Users</div>
       ${m?`<div style="display:flex;gap:24px;flex-wrap:wrap">${stat(m.users??'—','Registered')}${stat(m.confirmed??'—','Confirmed')}${stat(m.new_7d??'—','New · 7d')}</div>`
          :`<div style="font-size:13px;color:var(--text-muted)">Loading…</div>`}
+    </div>
+
+    <div class="card">
+      <div class="card-title">Support</div>
+      <div style="font-size:13px;color:var(--text-muted);margin-bottom:12px">Read and triage messages sent from the support form.${openTicketBadge()}</div>
+      <button class="btn btn-primary btn-full" id="open-support-btn">Support Tickets</button>
     </div>
 
     <div class="card">
@@ -1353,6 +1433,10 @@ function attachEvents(){
   el('admin-back-btn', ()=>{ state.view='more'; render(); });
   el('note-post-btn', postDevNote);
   document.querySelectorAll('.dev-note-del').forEach(b=>b.addEventListener('click',()=>deleteDevNote(b.dataset.id)));
+  el('open-support-btn', ()=>{ if(isOwner()){ state.view='support'; render(); } });
+  el('support-back-btn', ()=>{ state.view='admin'; render(); });
+  document.querySelectorAll('.ticket-resolve').forEach(b=>b.addEventListener('click',()=>setTicketResolved(b.dataset.id, b.dataset.val==='1')));
+  document.querySelectorAll('.ticket-del').forEach(b=>b.addEventListener('click',()=>deleteTicket(b.dataset.id)));
   el('show-privacy-btn', ()=>showPolicyModal('Privacy Policy', PRIVACY_POLICY));
   el('show-tos-btn',     ()=>showPolicyModal('Terms of Service', TERMS_OF_SERVICE));
   el('support-submit-btn', ()=>{ submitSupportMessage(); });
