@@ -186,7 +186,7 @@ function toggleTheme(){ setTheme(state.theme==='light'?'dark':'light'); render()
 function versionStamp(){ return `<div style="display:flex;align-items:center;gap:6px"><div style="font-size:10px;color:var(--text-muted);font-weight:600">v${APP_VERSION}</div><button onclick="toggleTheme()" title="Toggle light/dark mode" aria-label="Toggle light/dark mode" style="background:none;border:none;cursor:pointer;font-size:14px;line-height:1;padding:0;color:var(--text-muted)">${state.theme==='light'?'🌙':'☀️'}</button></div>`; }
 function isOwner(){ return currentUser?.id === OWNER_UID; }
 
-const APP_VERSION = '2.14.3';
+const APP_VERSION = '2.15.0';
 const OWNER_UID     = '031a65ed-f52d-4a67-b271-47778e920c22';
 // Invite code from the URL (?invite=CODE) — drives the invite-only signup flow.
 let pendingInvite = new URLSearchParams(location.search).get('invite');
@@ -230,7 +230,7 @@ let state = {
   setType:'working',weight:45,reps:10,weightInc:5,repsInc:1,
   pendingSets:[],_currentSession:null,
   sessions:[],prs:{},favorites:[],customExercises:[],
-  historyTab:'plan', volumePeriod:'week', planTargets:{},
+  historyTab:'plan', volumePeriod:'week', goal: localStorage.getItem('li_goal')||'hypertrophy', planTargets:{hypertrophy:{},strength:{}},
   weightView:'list', weightPeriod:'1m',
   nutritionView:'log', nutritionPeriod:'1m', calorieDisplay:'total',
   timer:{remaining:0,total:0,interval:null,running:false},
@@ -267,7 +267,7 @@ async function initAuth(){
 }
 
 function resetAppState(){
-  state.sessions=[]; state.prs={}; state.favorites=[]; state.planTargets={};
+  state.sessions=[]; state.prs={}; state.favorites=[]; state.planTargets={hypertrophy:{},strength:{}};
   state.foodLog=[]; state.mealFavorites=[]; state.weightLog=[];
   state.macroGoals={calories:2500,protein:180,carbs:250,fat:80};
   state.logStep='type'; state._currentSession=null; state.pendingSets=[]; state.view='log';
@@ -306,7 +306,7 @@ async function loadUserData(){
     state.favorites     = (ef.data|| []).map(r=>r.exercise);
     state.customExercises = ce.data || [];
     // Plan targets — loaded separately so a missing table never aborts the main data load.
-    try{ const pg=await sb.from('plan_targets').select('targets').eq('user_id',userId).maybeSingle(); state.planTargets=(pg.data&&pg.data.targets)||{}; }catch(e){ state.planTargets={}; }
+    try{ const pg=await sb.from('plan_targets').select('targets').eq('user_id',userId).maybeSingle(); const raw=(pg.data&&pg.data.targets)||{}; state.planTargets=(raw.hypertrophy||raw.strength)?{hypertrophy:raw.hypertrophy||{},strength:raw.strength||{}}:{hypertrophy:raw,strength:{}}; }catch(e){ state.planTargets={hypertrophy:{},strength:{}}; }
     console.log('Loaded — sessions:',state.sessions.length,'prs:',Object.keys(state.prs).length);
   } catch(err){
     console.error('loadUserData exception:',err);
@@ -566,7 +566,7 @@ function renderLog(){
 
 function renderWorkoutScreen(){
   const hasSets=state._currentSession?.exercises?.length;
-  const counts=weeklySetCounts();
+  const counts=weeklySetCounts(state.goal==='strength');
   return `
     <div style="display:flex;align-items:baseline;justify-content:space-between"><div class="page-title">Log Workout</div>${versionStamp()}</div>
     <div class="subtitle">${fmtDate(Date.now())}</div>
@@ -584,7 +584,7 @@ function renderWorkoutScreen(){
 
 function renderGroupMuscleSelect(){
   const muscles=GROUPS[state.selectedGroup]||[];
-  const counts=weeklySetCounts();
+  const counts=weeklySetCounts(state.goal==='strength');
   return `
     <div style="display:flex;align-items:center;gap:10px">
       <button class="btn btn-outline btn-sm" id="back-workout">← Back</button>
@@ -959,30 +959,48 @@ function renderHistory(){
 
 function startOfWeekMonday(ts){ const d=new Date(ts); d.setHours(0,0,0,0); const day=d.getDay(); d.setDate(d.getDate()-(day===0?6:day-1)); return d.getTime(); }
 // Working sets per muscle for the current week (Mon start).
-function weeklySetCounts(){
+function weeklySetCounts(strengthOnly){
   const start=startOfWeekMonday(Date.now()); const c={};
-  state.sessions.forEach(s=>{ if(s.date<start) return; (s.exercises||[]).forEach(ex=>{ if(ex.type==='cardio'||!ex.sets) return; const m=ex.muscle; if(!m) return; ex.sets.forEach(set=>{ if(set.type==='working') c[m]=(c[m]||0)+1; }); }); });
+  state.sessions.forEach(s=>{ if(s.date<start) return; (s.exercises||[]).forEach(ex=>{ if(ex.type==='cardio'||!ex.sets) return; const m=ex.muscle; if(!m) return; ex.sets.forEach(set=>{ if(set.type!=='working') return; if(strengthOnly && (parseInt(set.reps)||0)>6) return; c[m]=(c[m]||0)+1; }); }); });
   return c;
 }
+function setGoal(g){ state.goal=g; try{ localStorage.setItem('li_goal',g); }catch(e){} render(); }
+function goalTargets(){ return (state.planTargets&&state.planTargets[state.goal])||{}; }
+function goalUpper(){ return state.goal==='strength'?12:20; }
 let _planSaveTimer=null;
 function schedulePlanSave(){ clearTimeout(_planSaveTimer); _planSaveTimer=setTimeout(dbSavePlan,600); }
 async function dbSavePlan(){ const {error}=await sb.from('plan_targets').upsert({user_id:currentUser.id,targets:state.planTargets,updated_at:new Date().toISOString()},{onConflict:'user_id'}); if(error) toast('Could not save plan','var(--red)'); }
-function volumeColor(n){ return n>20?'var(--red)':n>=18?'#f97316':n>=12?'var(--amber)':'var(--accent)'; }
-// Mini progress bar for a workout button. muscles = [m] for one muscle, or a group's muscle list.
+function volumeColor(n, goal){ goal=goal||state.goal; if(goal==='strength') return n>12?'var(--red)':n>=10?'#f97316':n>=6?'var(--amber)':'var(--accent)'; return n>20?'var(--red)':n>=18?'#f97316':n>=12?'var(--amber)':'var(--accent)'; }
+// Mini progress bar for a workout button. muscles = [m] for one muscle, or a group's muscle list. Hidden when goal is 'off'.
 function volBar(counts, muscles){
-  const tgts=state.planTargets||{}; let sets=0, tgt=0;
+  if(state.goal==='off') return '';
+  const tgts=goalTargets(); let sets=0, tgt=0;
   muscles.forEach(m=>{ sets+=counts[m]||0; tgt+=parseInt(tgts[m])||0; });
-  const ref=tgt>0?tgt:muscles.length*20;
+  const ref=tgt>0?tgt:muscles.length*goalUpper();
   const pct=ref>0?Math.min(100,Math.round(sets/ref*100)):0;
   const color=volumeColor(sets/Math.max(1,muscles.length));
   return `<div class="mbtn-bar"><div style="height:100%;width:${pct}%;background:${color}"></div></div>`;
 }
 function renderPlanTab(){
-  const actual=weeklySetCounts(), t=state.planTargets||{};
+  const goal=state.goal;
+  const toggle=`<div class="toggle-group" style="margin-bottom:10px">
+      <div class="toggle-opt ${goal==='hypertrophy'?'active':''}" data-goal="hypertrophy" style="font-size:13px">Hypertrophy</div>
+      <div class="toggle-opt ${goal==='strength'?'active':''}" data-goal="strength" style="font-size:13px">Strength</div>
+      <div class="toggle-opt ${goal==='off'?'active':''}" data-goal="off" style="font-size:13px">Off</div>
+    </div>`;
+  if(goal==='off') return toggle+`<div class="empty" style="line-height:1.6">Volume planning is off. Pick <b style="color:var(--text)">Hypertrophy</b> or <b style="color:var(--text)">Strength</b> above to set weekly per-muscle targets and see progress on your workout screens.</div>`;
+  const strength=goal==='strength';
+  const actual=weeklySetCounts(strength), t=goalTargets();
   const lg=(c,l)=>`<span style="display:inline-flex;align-items:center;gap:4px"><span style="display:inline-block;width:9px;height:9px;border-radius:2px;background:${c}"></span>${l}</span>`;
-  return `
-    <div style="font-size:12px;color:var(--text-muted);margin-bottom:6px;line-height:1.5">Set a weekly working-set target per muscle. Progress is for this week and resets Monday. Research suggests roughly <b style="color:var(--text)">10–20 hard sets per muscle per week</b> for growth.</div>
-    <div style="display:flex;flex-wrap:wrap;gap:12px;font-size:11px;color:var(--text-muted);margin-bottom:8px">${lg('var(--accent)','0–12')}${lg('var(--amber)','12–18')}${lg('#f97316','18–20')}${lg('var(--red)','20+')}</div>
+  const intro=strength
+    ? `Set a weekly target for <b style="color:var(--text)">heavy sets (≤6 reps)</b> per muscle. Strength favors fewer, heavier sets — these thresholds are a practical guideline, not a hard rule.`
+    : `Set a weekly working-set target per muscle. Research suggests roughly <b style="color:var(--text)">10–20 hard sets per muscle per week</b> for growth.`;
+  const legend=strength
+    ? `${lg('var(--accent)','0–6')}${lg('var(--amber)','6–10')}${lg('#f97316','10–12')}${lg('var(--red)','12+')}`
+    : `${lg('var(--accent)','0–12')}${lg('var(--amber)','12–18')}${lg('#f97316','18–20')}${lg('var(--red)','20+')}`;
+  return toggle+`
+    <div style="font-size:12px;color:var(--text-muted);margin-bottom:6px;line-height:1.5">${intro} Progress is for this week and resets Monday.</div>
+    <div style="display:flex;flex-wrap:wrap;gap:12px;font-size:11px;color:var(--text-muted);margin-bottom:8px">${legend}</div>
     ${Object.entries(GROUPS).map(([group,muscles])=>`
       <div class="card">
         <div class="card-title">${group}</div>
@@ -1188,8 +1206,9 @@ function attachEvents(){
   document.querySelectorAll('[data-wtperiod]').forEach(b=>b.addEventListener('click',()=>{ state.weightPeriod=b.dataset.wtperiod; render(); }));
 
   document.querySelectorAll('[data-histtab]').forEach(b=>b.addEventListener('click',()=>{ state.historyTab=b.dataset.histtab; render(); }));
+  document.querySelectorAll('[data-goal]').forEach(b=>b.addEventListener('click',()=>setGoal(b.dataset.goal)));
   document.querySelectorAll('[data-plan-muscle]').forEach(b=>{
-    b.addEventListener('input',()=>{ const m=b.dataset.planMuscle, v=parseInt(b.value)||0; if(v>0) state.planTargets[m]=v; else delete state.planTargets[m]; schedulePlanSave(); });
+    b.addEventListener('input',()=>{ const m=b.dataset.planMuscle, v=parseInt(b.value)||0; const map=state.planTargets[state.goal]||(state.planTargets[state.goal]={}); if(v>0) map[m]=v; else delete map[m]; schedulePlanSave(); });
     b.addEventListener('change',()=>render());
   });
   document.querySelectorAll('.pr-card').forEach(b=>b.addEventListener('click',()=>showPRModal(b.dataset.pr)));
