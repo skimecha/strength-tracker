@@ -186,7 +186,7 @@ function toggleTheme(){ setTheme(state.theme==='light'?'dark':'light'); render()
 function versionStamp(){ return `<div style="display:flex;align-items:center;gap:6px"><div style="font-size:10px;color:var(--text-muted);font-weight:600">v${APP_VERSION}</div><button onclick="toggleTheme()" title="Toggle light/dark mode" aria-label="Toggle light/dark mode" style="background:none;border:none;cursor:pointer;font-size:14px;line-height:1;padding:0;color:var(--text-muted)">${state.theme==='light'?'🌙':'☀️'}</button></div>`; }
 function isOwner(){ return currentUser?.id === OWNER_UID; }
 
-const APP_VERSION = '2.16.2';
+const APP_VERSION = '2.16.3';
 const OWNER_UID     = '031a65ed-f52d-4a67-b271-47778e920c22';
 // Invite code from the URL (?invite=CODE) — drives the invite-only signup flow.
 let pendingInvite = new URLSearchParams(location.search).get('invite');
@@ -230,7 +230,7 @@ let state = {
   setType:'working',weight:45,reps:10,weightInc:5,repsInc:1,
   pendingSets:[],_currentSession:null,
   sessions:[],prs:{},favorites:[],customExercises:[],
-  historyTab:'plan', volumePeriod:'week', goal: localStorage.getItem('li_goal')||'hypertrophy', planTargets:{hypertrophy:{},strength:{}},
+  historyTab:'plan', volumePeriod:'week', goal: localStorage.getItem('li_goal')||'hypertrophy', strengthRedMode: localStorage.getItem('li_str_red')||'fixed', planTargets:{hypertrophy:{},strength:{}},
   weightView:'list', weightPeriod:'1m',
   nutritionView:'log', nutritionPeriod:'1m', calorieDisplay:'total',
   timer:{remaining:0,total:0,interval:null,running:false},
@@ -965,6 +965,7 @@ function weeklySetCounts(strengthOnly){
   return c;
 }
 function setGoal(g){ state.goal=g; try{ localStorage.setItem('li_goal',g); }catch(e){} render(); }
+function setStrengthRedMode(m){ state.strengthRedMode=m; try{ localStorage.setItem('li_str_red',m); }catch(e){} render(); }
 function goalTargets(){ return (state.planTargets&&state.planTargets[state.goal])||{}; }
 function goalUpper(){ return state.goal==='strength'?12:20; }
 let _planSaveTimer=null;
@@ -977,8 +978,12 @@ function volumeColor(n, goal){ goal=goal||state.goal; if(goal==='strength') retu
 // thresholds. The unfilled track runs toward the target (ref).
 function volumeSegBar(did, ref, goal){
   goal=goal||state.goal;
+  // Strength red caution: "fixed" warns past an absolute ~12 heavy sets/week
+  // (a recovery guardrail, same for everyone); "relative" warns once you go
+  // past your own target (scales the caution to your plan).
+  const redAt = state.strengthRedMode==='relative' ? Math.max(1,ref) : 12;
   const bands=goal==='strength'
-    ? [[0,12,'var(--accent)'],[12,1e9,'var(--red)']]
+    ? [[0,redAt,'var(--accent)'],[redAt,1e9,'var(--red)']]
     : [[0,12,'var(--accent)'],[12,18,'#eab308'],[18,20,'#f97316'],[20,1e9,'var(--red)']];
   const scale=Math.max(ref,did,1);
   const segs=bands.map(([lo,hi,c])=>{ const a=Math.max(lo,0), b=Math.min(hi,did); return b>a?`<div style="height:100%;width:${(b-a)/scale*100}%;background:${c}"></div>`:''; }).join('');
@@ -1008,12 +1013,24 @@ function renderPlanTab(){
   const intro=strength
     ? `Set a weekly target for <b style="color:var(--text)">heavy sets (≤6 reps)</b> per muscle. Strength is load-driven, so the goal is enough heavy exposure — not piling on volume. The bar just fills toward your target; red flags too much heavy work to recover from.`
     : `Set a weekly working-set target per muscle. Research suggests roughly <b style="color:var(--text)">10–20 hard sets per muscle per week</b> for growth.`;
+  const relRed=strength&&state.strengthRedMode==='relative';
   const legend=strength
-    ? `${lg('var(--accent)','Toward target')}${lg('var(--red)','12+ (too much)')}`
+    ? `${lg('var(--accent)','Toward target')}${lg('var(--red)',relRed?'Over target':'12+ (too much)')}`
     : `${lg('var(--accent)','0–12')}${lg('#eab308','12–18')}${lg('#f97316','18–20')}${lg('var(--red)','20+')}`;
+  const redModeBox=strength?`
+    <div class="card" style="margin-bottom:8px">
+      <div style="font-size:12px;color:var(--text-muted);line-height:1.5;margin-bottom:8px"><b style="color:var(--text)">When does red appear?</b> Heavy sets are recovery-costly, so the bar flags when you've done too many — but "too many" can be judged two ways:<br>
+        • <b style="color:var(--text)">Fixed</b> — an absolute ~12 heavy sets per muscle per week, the same recovery guardrail for everyone.<br>
+        • <b style="color:var(--text)">Relative</b> — tied to your own target, so red appears as soon as you go past your plan.</div>
+      <div class="toggle-group">
+        <div class="toggle-opt ${state.strengthRedMode==='fixed'?'active':''}" data-strred="fixed" style="font-size:13px">Fixed (12+)</div>
+        <div class="toggle-opt ${state.strengthRedMode==='relative'?'active':''}" data-strred="relative" style="font-size:13px">Relative</div>
+      </div>
+    </div>`:'';
   return toggle+`
     <div style="font-size:12px;color:var(--text-muted);margin-bottom:6px;line-height:1.5">${intro} Progress is for this week and resets Monday.</div>
     <div style="display:flex;flex-wrap:wrap;gap:12px;font-size:11px;color:var(--text-muted);margin-bottom:8px">${legend}</div>
+    ${redModeBox}
     ${Object.entries(GROUPS).map(([group,muscles])=>`
       <div class="card">
         <div class="card-title">${group}</div>
@@ -1220,6 +1237,7 @@ function attachEvents(){
 
   document.querySelectorAll('[data-histtab]').forEach(b=>b.addEventListener('click',()=>{ state.historyTab=b.dataset.histtab; render(); }));
   document.querySelectorAll('[data-goal]').forEach(b=>b.addEventListener('click',()=>setGoal(b.dataset.goal)));
+  document.querySelectorAll('[data-strred]').forEach(b=>b.addEventListener('click',()=>setStrengthRedMode(b.dataset.strred)));
   document.querySelectorAll('[data-plan-muscle]').forEach(b=>{
     b.addEventListener('input',()=>{ const m=b.dataset.planMuscle, v=parseInt(b.value)||0; const map=state.planTargets[state.goal]||(state.planTargets[state.goal]={}); if(v>0) map[m]=v; else delete map[m]; schedulePlanSave(); });
     b.addEventListener('change',()=>render());
