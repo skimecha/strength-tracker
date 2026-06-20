@@ -186,7 +186,7 @@ function toggleTheme(){ setTheme(state.theme==='light'?'dark':'light'); render()
 function versionStamp(){ return `<div style="display:flex;align-items:center;gap:6px"><div style="font-size:10px;color:var(--text-muted);font-weight:600">v${APP_VERSION}</div><button onclick="toggleTheme()" title="Toggle light/dark mode" aria-label="Toggle light/dark mode" style="background:none;border:none;cursor:pointer;font-size:14px;line-height:1;padding:0;color:var(--text-muted)">${state.theme==='light'?'🌙':'☀️'}</button></div>`; }
 function isOwner(){ return currentUser?.id === OWNER_UID; }
 
-const APP_VERSION = '2.15.1';
+const APP_VERSION = '2.16.0';
 const OWNER_UID     = '031a65ed-f52d-4a67-b271-47778e920c22';
 // Invite code from the URL (?invite=CODE) — drives the invite-only signup flow.
 let pendingInvite = new URLSearchParams(location.search).get('invite');
@@ -1037,6 +1037,24 @@ function renderVolumeTab(){
 }
 
 // ── MORE ──────────────────────────────────────────────────────────────────────
+function devNoteHTML(n){ return `<div style="font-size:13px;color:var(--text-muted);line-height:1.55"><div style="font-weight:700;color:var(--text);margin-bottom:5px">${n.date} — ${n.title}</div>${n.body}<div style="text-align:right;margin-top:8px;font-weight:700;color:var(--text)">— Matt</div></div>`; }
+const DEV_NOTES=[
+  {date:'6/19/2026',title:'Strength goals',body:`Building on the volume planning, I added a Training Goal toggle to the Plan tab: Hypertrophy, Strength, or Off. Hypertrophy is the volume-first view we already had. Strength works differently — since strength is driven more by heavy load than by total volume, this mode only counts your heavy sets (6 reps or fewer) toward each muscle's weekly target, and the "too much" thresholds come down accordingly. You set separate targets for each goal, so switching between them shows the right numbers. Off turns the whole volume system back off for a clean, simple log. Just note: the hypertrophy set ranges are well supported by research, but the strength thresholds are more of a sensible guideline than settled science — take those as a starting point.
+        <div style="margin-top:8px">Citations:</div>
+        <div style="margin-top:2px">• <a href="https://pubmed.ncbi.nlm.nih.gov/28834797/" target="_blank" rel="noopener" style="color:var(--accent);text-decoration:none">Schoenfeld et al. (2017) — high- vs low-load &amp; strength</a></div>
+        <div style="margin-top:2px">• <a href="https://pubmed.ncbi.nlm.nih.gov/30153194/" target="_blank" rel="noopener" style="color:var(--accent);text-decoration:none">Schoenfeld et al. (2019) — volume drives hypertrophy, not strength</a></div>`},
+  {date:'6/19/2026',title:'Volume planning',body:`Tonight I reorganized the History area and added a Volume tab, which got me thinking about using volume as the primary way to plan workouts. The research shows hypertrophy is well driven by training a muscle close to failure a certain number of times each week. Volume here means the number of working sets you perform on a muscle in a given window — and if each of those sets is taken to within two to three reps of failure, then watching your weekly volume per muscle is a great guide for what to prioritize. (You don't need to grind to absolute failure, though — the research suggests stopping a couple reps short works nearly as well.) If it's Friday and you've only hit half your triceps target, the move is to prioritize triceps that day, rest them Saturday, and finish the volume Sunday.
+        <div style="margin-top:8px">Citations:</div>
+        <div style="margin-top:2px">• <a href="https://pubmed.ncbi.nlm.nih.gov/27433992/" target="_blank" rel="noopener" style="color:var(--accent);text-decoration:none">Schoenfeld, Ogborn &amp; Krieger (2017) — weekly volume &amp; muscle mass</a></div>
+        <div style="margin-top:2px">• <a href="https://www.ncbi.nlm.nih.gov/pmc/articles/PMC9935748/" target="_blank" rel="noopener" style="color:var(--accent);text-decoration:none">Refalo et al. (2023) — proximity-to-failure &amp; hypertrophy</a></div>`},
+  {date:'6/19/2026',title:'AI Macros',body:`Added a new AI Macros button to fill the search gap. It calls on Claude Haiku to make a best guess at the macros. The next level up would be to make that call web-enabled, which would improve the ability to call on branded products but at a significant increase to token use. This version should do well with staple food and in testing so far it has been so close with branded foods I've tried that it's well within acceptable for tracking daily macros. Please feel free to let me know if you think it's not hitting the mark, though.`},
+  {date:'6/18/2026',title:'Nutrition update',body:`I have removed the search function from the nutrition area. The search pulled from a USDA database and I found the results very unclean and difficult to work with. Searching for "Chicken wings" would pull up 50 results from a myriad of chicken wing brands, and the experience was just... kluged. For now, the original experience is in place. You just name the food and input the macro information manually. I'll continue to work on alternatives. In the meantime, I find it easy to enter a new food and run a quick google search for "[food name] nutrition" and that returns solid results.`},
+];
+function showAllUpdates(){
+  document.getElementById('modal-root').innerHTML=`<div class="modal-overlay" id="modal-overlay"><div class="modal" style="max-height:88vh;overflow-y:auto"><div class="modal-title">Release Notes &amp; Dev Updates</div>${DEV_NOTES.map(devNoteHTML).join('<hr class="divider" style="margin:14px 0">')}<button class="btn btn-outline btn-full" id="modal-cancel" style="margin-top:10px">Close</button></div></div>`;
+  document.getElementById('modal-cancel').addEventListener('click',closeModal);
+  document.getElementById('modal-overlay').addEventListener('click',e=>{ if(e.target===e.currentTarget) closeModal(); });
+}
 function renderMore(){
   return `
     <div style="display:flex;align-items:baseline;justify-content:space-between"><div class="page-title">More</div>${versionStamp()}</div>
@@ -1080,26 +1098,8 @@ function renderMore(){
 
     <div class="card">
       <div class="card-title">Release Notes &amp; Dev Updates</div>
-      <div style="font-size:13px;color:var(--text-muted);line-height:1.55">
-        <div style="font-weight:700;color:var(--text);margin-bottom:5px">6/19/2026 — Volume planning</div>
-        Tonight I reorganized the History area and added a Volume tab, which got me thinking about using volume as the primary way to plan workouts. The research shows hypertrophy is well driven by training a muscle close to failure a certain number of times each week. Volume here means the number of working sets you perform on a muscle in a given window — and if each of those sets is taken to within two to three reps of failure, then watching your weekly volume per muscle is a great guide for what to prioritize. (You don't need to grind to absolute failure, though — the research suggests stopping a couple reps short works nearly as well.) If it's Friday and you've only hit half your triceps target, the move is to prioritize triceps that day, rest them Saturday, and finish the volume Sunday.
-        <div style="margin-top:8px">Citations:</div>
-        <div style="margin-top:2px">• <a href="https://pubmed.ncbi.nlm.nih.gov/27433992/" target="_blank" rel="noopener" style="color:var(--accent);text-decoration:none">Schoenfeld, Ogborn &amp; Krieger (2017) — weekly volume &amp; muscle mass</a></div>
-        <div style="margin-top:2px">• <a href="https://www.ncbi.nlm.nih.gov/pmc/articles/PMC9935748/" target="_blank" rel="noopener" style="color:var(--accent);text-decoration:none">Refalo et al. (2023) — proximity-to-failure &amp; hypertrophy</a></div>
-        <div style="text-align:right;margin-top:8px;font-weight:700;color:var(--text)">— Matt</div>
-      </div>
-      <hr class="divider" style="margin:14px 0">
-      <div style="font-size:13px;color:var(--text-muted);line-height:1.55">
-        <div style="font-weight:700;color:var(--text);margin-bottom:5px">6/19/2026 — AI Macros</div>
-        Added a new AI Macros button to fill the search gap. It calls on Claude Haiku to make a best guess at the macros. The next level up would be to make that call web-enabled, which would improve the ability to call on branded products but at a significant increase to token use. This version should do well with staple food and in testing so far it has been so close with branded foods I've tried that it's well within acceptable for tracking daily macros. Please feel free to let me know if you think it's not hitting the mark, though.
-        <div style="text-align:right;margin-top:8px;font-weight:700;color:var(--text)">— Matt</div>
-      </div>
-      <hr class="divider" style="margin:14px 0">
-      <div style="font-size:13px;color:var(--text-muted);line-height:1.55">
-        <div style="font-weight:700;color:var(--text);margin-bottom:5px">6/18/2026 — Nutrition update</div>
-        I have removed the search function from the nutrition area. The search pulled from a USDA database and I found the results very unclean and difficult to work with. Searching for "Chicken wings" would pull up 50 results from a myriad of chicken wing brands, and the experience was just... kluged. For now, the original experience is in place. You just name the food and input the macro information manually. I'll continue to work on alternatives. In the meantime, I find it easy to enter a new food and run a quick google search for "[food name] nutrition" and that returns solid results.
-        <div style="text-align:right;margin-top:8px;font-weight:700;color:var(--text)">— Matt</div>
-      </div>
+      ${devNoteHTML(DEV_NOTES[0])}
+      ${DEV_NOTES.length>1?`<button class="btn btn-outline btn-full" id="view-updates-btn" style="margin-top:12px">View all updates (${DEV_NOTES.length})</button>`:''}
     </div>
 
     <button class="btn btn-outline btn-sm btn-full" id="logout-btn">Sign Out</button>
@@ -1219,6 +1219,7 @@ function attachEvents(){
   el('manage-invites-btn', ()=>{ if(isOwner()) showInvitesModal(); });
   document.querySelectorAll('[data-theme]').forEach(b=>b.addEventListener('click',()=>{ setTheme(b.dataset.theme); render(); }));
   el('delete-account-btn',  ()=>{ showDeleteAccountModal(); });
+  el('view-updates-btn', showAllUpdates);
   el('show-privacy-btn', ()=>showPolicyModal('Privacy Policy', PRIVACY_POLICY));
   el('show-tos-btn',     ()=>showPolicyModal('Terms of Service', TERMS_OF_SERVICE));
   el('support-submit-btn', ()=>{ submitSupportMessage(); });
