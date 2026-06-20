@@ -185,7 +185,7 @@ function toggleTheme(){ setTheme(state.theme==='light'?'dark':'light'); render()
 function versionStamp(){ return `<div style="display:flex;align-items:center;gap:6px"><div style="font-size:10px;color:var(--text-muted);font-weight:600">v${APP_VERSION}</div><button onclick="toggleTheme()" title="Toggle light/dark mode" aria-label="Toggle light/dark mode" style="background:none;border:none;cursor:pointer;font-size:14px;line-height:1;padding:0;color:var(--text-muted)">${state.theme==='light'?'🌙':'☀️'}</button></div>`; }
 function isOwner(){ return currentUser?.id === OWNER_UID; }
 
-const APP_VERSION = '2.14.0';
+const APP_VERSION = '2.14.1';
 const OWNER_UID     = '031a65ed-f52d-4a67-b271-47778e920c22';
 // Invite code from the URL (?invite=CODE) — drives the invite-only signup flow.
 let pendingInvite = new URLSearchParams(location.search).get('invite');
@@ -1047,6 +1047,15 @@ function renderMore(){
 
     <div class="card">
       <div class="card-title">Release Notes &amp; Dev Updates</div>
+      <div style="font-size:13px;color:var(--text-muted);line-height:1.55">
+        <div style="font-weight:700;color:var(--text);margin-bottom:5px">6/19/2026 — Volume planning</div>
+        Tonight I reorganized the History area and added a Volume tab, which got me thinking about using volume as the primary way to plan workouts. The research shows hypertrophy is well driven by training a muscle close to failure a certain number of times each week. Volume here means the number of working sets you perform on a muscle in a given window — and if each of those sets is taken to within two to three reps of failure, then watching your weekly volume per muscle is a great guide for what to prioritize. (You don't need to grind to absolute failure, though — the research suggests stopping a couple reps short works nearly as well.) If it's Friday and you've only hit half your triceps target, the move is to prioritize triceps that day, rest them Saturday, and finish the volume Sunday.
+        <div style="margin-top:8px">Citations:</div>
+        <div style="margin-top:2px">• <a href="https://pubmed.ncbi.nlm.nih.gov/27433992/" target="_blank" rel="noopener" style="color:var(--accent);text-decoration:none">Schoenfeld, Ogborn &amp; Krieger (2017) — weekly volume &amp; muscle mass</a></div>
+        <div style="margin-top:2px">• <a href="https://www.ncbi.nlm.nih.gov/pmc/articles/PMC9935748/" target="_blank" rel="noopener" style="color:var(--accent);text-decoration:none">Refalo et al. (2023) — proximity-to-failure &amp; hypertrophy</a></div>
+        <div style="text-align:right;margin-top:8px;font-weight:700;color:var(--text)">— Matt</div>
+      </div>
+      <hr class="divider" style="margin:14px 0">
       <div style="font-size:13px;color:var(--text-muted);line-height:1.55">
         <div style="font-weight:700;color:var(--text);margin-bottom:5px">6/19/2026 — AI Macros</div>
         Added a new AI Macros button to fill the search gap. It calls on Claude Haiku to make a best guess at the macros. The next level up would be to make that call web-enabled, which would improve the ability to call on branded products but at a significant increase to token use. This version should do well with staple food and in testing so far it has been so close with branded foods I've tried that it's well within acceptable for tracking daily macros. Please feel free to let me know if you think it's not hitting the mark, though.
