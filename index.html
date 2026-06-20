@@ -186,7 +186,7 @@ function toggleTheme(){ setTheme(state.theme==='light'?'dark':'light'); render()
 function versionStamp(){ return `<div style="display:flex;align-items:center;gap:6px"><div style="font-size:10px;color:var(--text-muted);font-weight:600">v${APP_VERSION}</div><button onclick="toggleTheme()" title="Toggle light/dark mode" aria-label="Toggle light/dark mode" style="background:none;border:none;cursor:pointer;font-size:14px;line-height:1;padding:0;color:var(--text-muted)">${state.theme==='light'?'🌙':'☀️'}</button></div>`; }
 function isOwner(){ return currentUser?.id === OWNER_UID; }
 
-const APP_VERSION = '2.16.1';
+const APP_VERSION = '2.16.2';
 const OWNER_UID     = '031a65ed-f52d-4a67-b271-47778e920c22';
 // Invite code from the URL (?invite=CODE) — drives the invite-only signup flow.
 let pendingInvite = new URLSearchParams(location.search).get('invite');
@@ -978,7 +978,7 @@ function volumeColor(n, goal){ goal=goal||state.goal; if(goal==='strength') retu
 function volumeSegBar(did, ref, goal){
   goal=goal||state.goal;
   const bands=goal==='strength'
-    ? [[0,6,'var(--accent)'],[6,10,'#eab308'],[10,12,'#f97316'],[12,1e9,'var(--red)']]
+    ? [[0,12,'var(--accent)'],[12,1e9,'var(--red)']]
     : [[0,12,'var(--accent)'],[12,18,'#eab308'],[18,20,'#f97316'],[20,1e9,'var(--red)']];
   const scale=Math.max(ref,did,1);
   const segs=bands.map(([lo,hi,c])=>{ const a=Math.max(lo,0), b=Math.min(hi,did); return b>a?`<div style="height:100%;width:${(b-a)/scale*100}%;background:${c}"></div>`:''; }).join('');
@@ -1006,10 +1006,10 @@ function renderPlanTab(){
   const actual=weeklySetCounts(strength), t=goalTargets();
   const lg=(c,l)=>`<span style="display:inline-flex;align-items:center;gap:4px"><span style="display:inline-block;width:9px;height:9px;border-radius:2px;background:${c}"></span>${l}</span>`;
   const intro=strength
-    ? `Set a weekly target for <b style="color:var(--text)">heavy sets (≤6 reps)</b> per muscle. Strength favors fewer, heavier sets — these thresholds are a practical guideline, not a hard rule.`
+    ? `Set a weekly target for <b style="color:var(--text)">heavy sets (≤6 reps)</b> per muscle. Strength is load-driven, so the goal is enough heavy exposure — not piling on volume. The bar just fills toward your target; red flags too much heavy work to recover from.`
     : `Set a weekly working-set target per muscle. Research suggests roughly <b style="color:var(--text)">10–20 hard sets per muscle per week</b> for growth.`;
   const legend=strength
-    ? `${lg('var(--accent)','0–6')}${lg('#eab308','6–10')}${lg('#f97316','10–12')}${lg('var(--red)','12+')}`
+    ? `${lg('var(--accent)','Toward target')}${lg('var(--red)','12+ (too much)')}`
     : `${lg('var(--accent)','0–12')}${lg('#eab308','12–18')}${lg('#f97316','18–20')}${lg('var(--red)','20+')}`;
   return toggle+`
     <div style="font-size:12px;color:var(--text-muted);margin-bottom:6px;line-height:1.5">${intro} Progress is for this week and resets Monday.</div>
