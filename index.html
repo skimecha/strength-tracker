@@ -236,12 +236,22 @@ let _supportLoaded=false;
 async function loadSupportTickets(force){
   if(!isOwner()) return;
   if(_supportLoaded&&!force) return;
-  _supportLoaded=true;
+  _supportLoaded=true; state.supportError=null;
   try{
-    const r=await sb.from('support_messages').select('id,user_id,email,message,resolved,created_at').order('created_at',{ascending:false});
-    if(!r.error&&Array.isArray(r.data)){ state.supportTickets=r.data; if(state.view==='support'||state.view==='admin') render(); }
-    else _supportLoaded=false;
-  }catch(e){ _supportLoaded=false; }
+    // select('*') + client-side sort so a briefly-stale PostgREST schema cache
+    // (e.g. right after adding the created_at/resolved columns) can't error out
+    // a server-side .order() on a column it hasn't picked up yet.
+    const r=await sb.from('support_messages').select('*');
+    if(r.error) throw r.error;
+    const rows=Array.isArray(r.data)?r.data.slice():[];
+    rows.sort((a,b)=>new Date(b.created_at||0)-new Date(a.created_at||0));
+    state.supportTickets=rows;
+  }catch(e){
+    _supportLoaded=false;
+    state.supportError=(e&&(e.message||e.hint||e.code))||'Unknown error';
+    console.error('loadSupportTickets failed:',e);
+  }
+  if(state.view==='support'||state.view==='admin') render();
 }
 async function setTicketResolved(id,val){
   if(!isOwner()||!id) return;
@@ -257,7 +267,7 @@ async function deleteTicket(id){
   await loadSupportTickets(true); toast('Ticket deleted'); render();
 }
 
-const APP_VERSION = '2.19.0';
+const APP_VERSION = '2.19.1';
 const OWNER_UID     = '031a65ed-f52d-4a67-b271-47778e920c22';
 // Invite code from the URL (?invite=CODE) — drives the invite-only signup flow.
 let pendingInvite = new URLSearchParams(location.search).get('invite');
@@ -301,7 +311,7 @@ let state = {
   setType:'working',weight:45,reps:10,weightInc:5,repsInc:1,
   pendingSets:[],_currentSession:null,
   sessions:[],prs:{},favorites:[],customExercises:[],
-  historyTab:'plan', volumePeriod:'week', goal: localStorage.getItem('li_goal')||'hypertrophy', strengthRedMode: localStorage.getItem('li_str_red')||'fixed', planTargets:{hypertrophy:{},strength:{}}, adminMetrics:null, devNotes:null, supportTickets:null,
+  historyTab:'plan', volumePeriod:'week', goal: localStorage.getItem('li_goal')||'hypertrophy', strengthRedMode: localStorage.getItem('li_str_red')||'fixed', planTargets:{hypertrophy:{},strength:{}}, adminMetrics:null, devNotes:null, supportTickets:null, supportError:null,
   weightView:'list', weightPeriod:'1m',
   nutritionView:'log', nutritionPeriod:'1m', calorieDisplay:'total',
   timer:{remaining:0,total:0,interval:null,running:false},
@@ -343,7 +353,7 @@ function resetAppState(){
   state.macroGoals={calories:2500,protein:180,carbs:250,fat:80};
   state.logStep='type'; state._currentSession=null; state.pendingSets=[]; state.view='log';
   swStop(); state.cardio={activity:null,stopwatch:{running:false,elapsed:0,interval:null},distance:'',distUnit:'mi',heartRate:null,hrTestStep:'idle',hrTestCountdown:0,hrTestInterval:null,hrBeats:''};
-  state.adminMetrics=null; _adminLoaded=false; state.devNotes=null; state.supportTickets=null; _supportLoaded=false;
+  state.adminMetrics=null; _adminLoaded=false; state.devNotes=null; state.supportTickets=null; state.supportError=null; _supportLoaded=false;
 }
 
 async function loadUserData(){
@@ -1198,7 +1208,8 @@ function renderSupport(){
   const open=t?t.filter(x=>!x.resolved):[];
   const done=t?t.filter(x=>x.resolved):[];
   let body;
-  if(t===null) body='<div class="card"><div style="font-size:13px;color:var(--text-muted)">Loading…</div></div>';
+  if(state.supportError) body=`<div class="card"><div style="font-size:13px;color:var(--red);margin-bottom:12px;word-break:break-word">Couldn't load tickets: ${esc(state.supportError)}</div><button class="btn btn-outline" id="support-retry-btn" style="width:auto;padding:6px 14px">Retry</button></div>`;
+  else if(t===null) body='<div class="card"><div style="font-size:13px;color:var(--text-muted)">Loading…</div></div>';
   else if(t.length===0) body='<div class="empty">No support messages yet.</div>';
   else body=`
     <div style="font-size:12px;color:var(--text-muted);text-align:center;margin:2px 0 8px">${open.length} open · ${done.length} resolved</div>
@@ -1435,6 +1446,7 @@ function attachEvents(){
   document.querySelectorAll('.dev-note-del').forEach(b=>b.addEventListener('click',()=>deleteDevNote(b.dataset.id)));
   el('open-support-btn', ()=>{ if(isOwner()){ state.view='support'; render(); } });
   el('support-back-btn', ()=>{ state.view='admin'; render(); });
+  el('support-retry-btn', ()=>loadSupportTickets(true));
   document.querySelectorAll('.ticket-resolve').forEach(b=>b.addEventListener('click',()=>setTicketResolved(b.dataset.id, b.dataset.val==='1')));
   document.querySelectorAll('.ticket-del').forEach(b=>b.addEventListener('click',()=>deleteTicket(b.dataset.id)));
   el('show-privacy-btn', ()=>showPolicyModal('Privacy Policy', PRIVACY_POLICY));
