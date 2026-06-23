@@ -156,11 +156,12 @@ Deno.serve(async (req) => {
     // ── estimate: cache first, then AI on a miss ────────────────────────────
     if (base > 0) {
       try {
-        const { data: row } = await admin()
+        const { data: row, error: lookupErr } = await admin()
           .from("macro_cache")
           .select("cal_per,pro_per,carb_per,fat_per,samples")
           .eq("food_key", foodKey).eq("unit_class", cls).eq("clar_key", clarKey)
           .maybeSingle();
+        if (lookupErr) console.error("macro_cache lookup error:", lookupErr); // don't swallow — surface in logs
         if (row) {
           return json({
             type: "macros",

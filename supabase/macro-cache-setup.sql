@@ -35,6 +35,12 @@ create table if not exists public.macro_cache (
 alter table public.macro_cache enable row level security;
 -- No policies on purpose: only the service role (Edge Function) may touch it.
 revoke all on public.macro_cache from anon, authenticated;
+-- service_role bypasses RLS but still needs the base table grant — BYPASSRLS skips
+-- policies, NOT privileges. The Edge Function reads the cache directly as
+-- service_role, so without this the lookup fails with "permission denied" and the
+-- feature silently falls back to AI on every request. (Writes still worked without
+-- it because they go through the SECURITY DEFINER record function.)
+grant select, insert, update, delete on public.macro_cache to service_role;
 
 -- Atomic upsert that folds a new accepted sample into the running mean. Doing
 -- this in one statement avoids read-modify-write races between concurrent saves.
