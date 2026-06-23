@@ -269,7 +269,7 @@ async function deleteTicket(id){
   await loadSupportTickets(true); toast('Ticket deleted'); render();
 }
 
-const APP_VERSION = '2.21.0';
+const APP_VERSION = '2.21.1';
 const OWNER_UID     = '031a65ed-f52d-4a67-b271-47778e920c22';
 // Invite code from the URL (?invite=CODE) — drives the invite-only signup flow.
 let pendingInvite = new URLSearchParams(location.search).get('invite');
@@ -315,7 +315,7 @@ let state = {
   sessions:[],prs:{},favorites:[],customExercises:[],exerciseSettings:{},
   historyTab:'plan', volumePeriod:'week', goal: localStorage.getItem('li_goal')||'hypertrophy', strengthRedMode: localStorage.getItem('li_str_red')||'fixed', planTargets:{hypertrophy:{},strength:{}}, adminMetrics:null, devNotes:null, supportTickets:null, supportError:null,
   weightView:'list', weightPeriod:'1m', liftUnit: localStorage.getItem('li_lift_unit') || 'lbs',
-  nutritionView:'log', nutritionPeriod:'1m', calorieDisplay:'total',
+  nutritionView:'log', nutritionPeriod:'1m', calorieDisplay:'total', favSort: localStorage.getItem('li_fav_sort')||'recent',
   timer:{remaining:0,total:0,interval:null,running:false},
   favFilter:false,searchQ:'',
   macroGoals:{calories:2500,protein:180,carbs:250,fat:80},
@@ -1000,7 +1000,7 @@ function renderNutrition(){
     ${view==='log'?`
       <button class="btn btn-primary" id="add-food-btn">+ Add Food / Meal</button>
       ${todayEntries.length?`<div class="card"><div class="card-title">Today's Log</div><div class="section-gap">${[...todayEntries].reverse().map(e=>`<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:8px"><div style="flex:1;min-width:0"><div style="font-size:14px;font-weight:700;color:var(--text)">${esc(e.name)}</div><div style="font-size:12px;color:var(--text-muted);margin-top:2px">${fmtTime(e.ts)} · P:${e.protein}g C:${e.carbs}g F:${e.fat}g</div></div><div style="text-align:right;flex-shrink:0;display:flex;flex-direction:column;align-items:flex-end;gap:4px"><div style="font-size:16px;font-weight:800;color:var(--text)">${e.calories} kcal</div><div style="display:flex;gap:6px"><button class="btn btn-xs ${isMealFav(e)?'btn-amber':'btn-outline'}" data-fav-food="${e.id}" title="${isMealFav(e)?'Remove from favorites':'Save as favorite'}">★</button><button class="btn btn-xs btn-danger" data-del-food="${e.id}">✕</button></div></div></div>`).join('<hr class="divider" style="margin:2px 0">')}</div></div>`:''}
-      ${state.mealFavorites.length?`<div class="card"><div class="card-title">Favorites</div><div class="section-gap">${state.mealFavorites.map(f=>`<div style="display:flex;align-items:center;gap:10px"><div style="flex:1;min-width:0;cursor:pointer" data-edit-fav="${f.id}" title="Edit favorite"><div style="font-size:14px;font-weight:700;color:var(--text)">${esc(f.name)}</div><div style="font-size:12px;color:var(--text-muted);margin-top:1px">${f.calories} kcal · P:${f.protein}g C:${f.carbs}g F:${f.fat}g</div></div><button class="btn btn-outline btn-xs" data-log-fav="${f.id}" style="flex-shrink:0">+ Log</button><button class="fav-del" data-del-fav="${f.id}" title="Remove favorite">★</button></div>`).join('<hr class="divider" style="margin:2px 0">')}</div></div>`:''}
+      ${state.mealFavorites.length?`<div class="card"><div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;gap:8px"><div class="card-title" style="margin:0">Favorites</div><div class="toggle-group" style="width:auto;display:inline-flex;flex:0 0 auto"><div class="toggle-opt ${state.favSort==='recent'?'active':''}" onclick="state.favSort='recent';localStorage.setItem('li_fav_sort','recent');render()" style="padding:4px 12px;font-size:12px">Recent</div><div class="toggle-opt ${state.favSort==='alpha'?'active':''}" onclick="state.favSort='alpha';localStorage.setItem('li_fav_sort','alpha');render()" style="padding:4px 12px;font-size:12px">A–Z</div></div></div><div class="section-gap">${sortedFavorites().map(f=>`<div style="display:flex;align-items:center;gap:10px"><div style="flex:1;min-width:0;cursor:pointer" data-edit-fav="${f.id}" title="Edit favorite"><div style="font-size:14px;font-weight:700;color:var(--text)">${esc(f.name)}</div><div style="font-size:12px;color:var(--text-muted);margin-top:1px">${f.calories} kcal · P:${f.protein}g C:${f.carbs}g F:${f.fat}g</div></div><button class="btn btn-outline btn-xs" data-log-fav="${f.id}" style="flex-shrink:0">+ Log</button><button class="fav-del" data-del-fav="${f.id}" title="Remove favorite">★</button></div>`).join('<hr class="divider" style="margin:2px 0">')}</div></div>`:''}
       <div style="font-size:11px;color:var(--text-muted);text-align:center">Export all data from the History tab</div>
     `:`
       <div style="display:flex;gap:6px;overflow-x:auto;padding-bottom:2px;flex-shrink:0">
@@ -1014,6 +1014,12 @@ function renderNutrition(){
     `}`;
 }
 function macroBar(label,color,val,goal,unit){ const pct=goal>0?Math.min(100,Math.round(val/goal*100)):0; return `<div class="macro-row"><span class="macro-label">${label}</span><span class="macro-val">${val}/${goal}${unit}</span></div><div class="macro-bar-wrap"><div class="macro-bar" style="width:${pct}%;background:${color}"></div></div>`; }
+function sortedFavorites(){
+  const nm=(s)=>String(s||'').toLowerCase();
+  return [...state.mealFavorites].sort((a,b)=> state.favSort==='alpha'
+    ? nm(a.name).localeCompare(nm(b.name))
+    : ( (new Date(b.created_at||0)) - (new Date(a.created_at||0)) ) || nm(a.name).localeCompare(nm(b.name)) );
+}
 
 // ── BODYWEIGHT ────────────────────────────────────────────────────────────────
 function renderBodyweight(){
@@ -1535,7 +1541,7 @@ function attachEvents(){
   document.querySelectorAll('[data-fav-food]').forEach(b=>b.addEventListener('click',()=>{ 
     const entry=state.foodLog.find(e=>e.id===b.dataset.favFood); if(!entry) return;
     if(isMealFav(entry)){ state.mealFavorites=state.mealFavorites.filter(f=>!(f.name===entry.name&&f.calories===entry.calories&&f.protein===entry.protein)); toast('Removed from favorites'); dbDeleteMealFav(state.mealFavorites.find?.[0]?.id); }
-    else{ const fav={id:uid(),name:entry.name,calories:entry.calories,protein:entry.protein,carbs:entry.carbs,fat:entry.fat}; state.mealFavorites.push(fav); toast('Saved as favorite ★'); dbAddMealFav(fav); }
+    else{ const fav={id:uid(),name:entry.name,calories:entry.calories,protein:entry.protein,carbs:entry.carbs,fat:entry.fat,created_at:new Date().toISOString()}; state.mealFavorites.push(fav); toast('Saved as favorite ★'); dbAddMealFav(fav); }
     render();
   }));
   document.querySelectorAll('[data-log-fav]').forEach(b=>b.addEventListener('click',()=>{
