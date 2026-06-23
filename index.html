@@ -269,7 +269,7 @@ async function deleteTicket(id){
   await loadSupportTickets(true); toast('Ticket deleted'); render();
 }
 
-const APP_VERSION = '2.20.0';
+const APP_VERSION = '2.21.0';
 const OWNER_UID     = '031a65ed-f52d-4a67-b271-47778e920c22';
 // Invite code from the URL (?invite=CODE) — drives the invite-only signup flow.
 let pendingInvite = new URLSearchParams(location.search).get('invite');
@@ -312,9 +312,9 @@ let state = {
   selectedMuscle:null,selectedExercise:null,selectedGroup:null,
   setType:'working',weight:45,reps:10,weightInc:5,repsInc:1,
   pendingSets:[],_currentSession:null,
-  sessions:[],prs:{},favorites:[],customExercises:[],
+  sessions:[],prs:{},favorites:[],customExercises:[],exerciseSettings:{},
   historyTab:'plan', volumePeriod:'week', goal: localStorage.getItem('li_goal')||'hypertrophy', strengthRedMode: localStorage.getItem('li_str_red')||'fixed', planTargets:{hypertrophy:{},strength:{}}, adminMetrics:null, devNotes:null, supportTickets:null, supportError:null,
-  weightView:'list', weightPeriod:'1m',
+  weightView:'list', weightPeriod:'1m', liftUnit: localStorage.getItem('li_lift_unit') || 'lbs',
   nutritionView:'log', nutritionPeriod:'1m', calorieDisplay:'total',
   timer:{remaining:0,total:0,interval:null,running:false},
   favFilter:false,searchQ:'',
@@ -350,7 +350,7 @@ async function initAuth(){
 }
 
 function resetAppState(){
-  state.sessions=[]; state.prs={}; state.favorites=[]; state.planTargets={hypertrophy:{},strength:{}};
+  state.sessions=[]; state.prs={}; state.favorites=[]; state.exerciseSettings={}; state.planTargets={hypertrophy:{},strength:{}};
   state.foodLog=[]; state.mealFavorites=[]; state.weightLog=[];
   state.macroGoals={calories:2500,protein:180,carbs:250,fat:80};
   state.logStep='type'; state._currentSession=null; state.pendingSets=[]; state.view='log';
@@ -392,6 +392,8 @@ async function loadUserData(){
     // Plan targets — loaded separately so a missing table never aborts the main data load.
     try{ const pg=await sb.from('plan_targets').select('targets').eq('user_id',userId).maybeSingle(); const raw=(pg.data&&pg.data.targets)||{}; state.planTargets=(raw.hypertrophy||raw.strength)?{hypertrophy:raw.hypertrophy||{},strength:raw.strength||{}}:{hypertrophy:raw,strength:{}}; }catch(e){ state.planTargets={hypertrophy:{},strength:{}}; }
     await loadDevNotes();  // separate so a missing dev_notes table never aborts the main load
+    // Per-exercise settings (assisted flag). Isolated so a missing table never aborts the load.
+    try{ const es=await sb.from('exercise_settings').select('exercise,assisted').eq('user_id',userId); if(!es.error&&Array.isArray(es.data)){ const m={}; es.data.forEach(r=>{ m[r.exercise]={assisted:!!r.assisted}; }); state.exerciseSettings=m; } }catch(e){ state.exerciseSettings={}; }
     console.log('Loaded — sessions:',state.sessions.length,'prs:',Object.keys(state.prs).length);
   } catch(err){
     console.error('loadUserData exception:',err);
@@ -594,6 +596,9 @@ async function dbAddCustomExercise(muscle, name, id){
 async function dbDeleteCustomExercise(id){
   await sb.from('custom_exercises').delete().eq('id',id).eq('user_id',currentUser.id);
 }
+async function dbSetExerciseSetting(name, assisted){
+  await sb.from('exercise_settings').upsert({user_id:currentUser.id, exercise:name, assisted},{onConflict:'user_id,exercise'});
+}
 
 // ─── UTILS ───────────────────────────────────────────────────────────────────
 const uid=()=>(typeof crypto!=='undefined'&&crypto.randomUUID)?crypto.randomUUID():Math.random().toString(36).slice(2,9);
@@ -604,6 +609,47 @@ function fmtTime(d){ return new Date(d).toLocaleTimeString('en-US',{hour:'numeri
 function todayKey(){ return new Date().toLocaleDateString('en-US'); }
 function lbsToKg(v){ return (v*0.453592).toFixed(1); }
 function kgToLbs(v){ return (v*2.20462).toFixed(1); }
+
+// ── Lift weight units (lifting-only; the bodyweight tracker uses state.weightUnit) ──
+const LB_INCS=[1,5,10,25,45,100], KG_INCS=[1,2.5,5,10,20,25];
+function liftUnitLabel(){ return state.liftUnit==='kg'?'kg':'lbs'; }
+function liftIncrements(){ return state.liftUnit==='kg'?KG_INCS:LB_INCS; }
+function liftToLbs(v){ return state.liftUnit==='kg' ? +( +v*2.20462 ).toFixed(2) : +v; }        // display unit → canonical lbs (stored)
+function lbsToLift(lbs){ const n=+lbs; return state.liftUnit==='kg' ? +(n*0.453592).toFixed(1) : (Number.isInteger(n)?n:+n.toFixed(1)); } // lbs → display number
+function fmtLift(lbs){ return `${lbsToLift(lbs)} ${liftUnitLabel()}`; }                            // "100 lbs" / "45 kg"
+
+// ── Assisted exercises (lower weight = a better lift) ──
+function isAssisted(name){ const s=state.exerciseSettings[name]; return !!(s&&s.assisted); }
+// Best working set, honoring assisted (reverse) ordering. Higher reps breaks ties.
+function bestSet(sets, assisted){
+  return sets.reduce((a,b)=> assisted
+    ? ((b.weight<a.weight||(b.weight===a.weight&&b.reps>a.reps))?b:a)
+    : ((b.weight>a.weight||(b.weight===a.weight&&b.reps>a.reps))?b:a) );
+}
+// Is candidate a better PR than current, for this ordering?
+function betterPR(cand, cur, assisted){
+  if(!cur) return true;
+  return assisted
+    ? (cand.weight<cur.weight||(cand.weight===cur.weight&&cand.reps>cur.reps))
+    : (cand.weight>cur.weight||(cand.weight===cur.weight&&cand.reps>cur.reps));
+}
+// Recompute an exercise's PR from all logged working sets (used when its assisted flag flips).
+function recomputePR(name){
+  const assisted=isAssisted(name); let best=null;
+  state.sessions.forEach(s=>s.exercises.forEach(ex=>{
+    if(ex.type==='cardio'||ex.name!==name) return;
+    const working=(ex.sets||[]).filter(x=>x.type==='working');
+    if(!working.length) return;
+    const b=bestSet(working,assisted);
+    if(betterPR(b,best,assisted)) best={weight:b.weight,reps:b.reps,date:s.date};
+  }));
+  if(best){ state.prs[name]=best; dbSavePR(name,best); }
+}
+function setAssisted(name, assisted){
+  state.exerciseSettings[name]={assisted:!!assisted};
+  dbSetExerciseSetting(name, !!assisted);
+  recomputePR(name);
+}
 function displayWeight(entry){
   if(entry.unit===state.weightUnit) return `${entry.value} ${entry.unit}`;
   return state.weightUnit==='kg'?`${lbsToKg(entry.value)} kg`:`${kgToLbs(entry.value)} lbs`;
@@ -724,14 +770,20 @@ function renderSets(){
     <div class="card"><div class="card-title">Set Type</div><div class="toggle-group"><div class="toggle-opt ${state.setType==='warmup'?'active':''}" data-toggle="warmup">Warmup</div><div class="toggle-opt ${state.setType==='working'?'active':''}" data-toggle="working">Working</div></div></div>
     <div class="card">
       <div class="card-title">${state.setType==='warmup'?'Warmup':'Working'} Set ${setNum}</div>
-      <label>Weight (lbs)</label>
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:5px">
+        <label style="margin:0">Weight (${liftUnitLabel()})</label>
+        <div class="toggle-group" style="width:auto;display:inline-flex;flex:0 0 auto">
+          <div class="toggle-opt ${state.liftUnit==='lbs'?'active':''}" data-lunit="lbs" style="padding:4px 14px;font-size:12px">lbs</div>
+          <div class="toggle-opt ${state.liftUnit==='kg'?'active':''}" data-lunit="kg" style="padding:4px 14px;font-size:12px">kg</div>
+        </div>
+      </div>
       <div class="stepper"><button class="stepper-btn" data-adj="weight" data-dir="-1">−</button><div class="stepper-val" id="sv-weight">${state.weight}</div><button class="stepper-btn" data-adj="weight" data-dir="1">+</button></div>
-      <div class="increments">${[1,5,10,25,45,100].map(v=>`<div class="inc-btn ${state.weightInc===v?'active':''}" data-winc="${v}">${v}</div>`).join('')}</div>
+      <div class="increments">${liftIncrements().map(v=>`<div class="inc-btn ${state.weightInc===v?'active':''}" data-winc="${v}">${v}</div>`).join('')}</div>
       <div style="margin-top:14px"><label>Reps</label>
       <div class="stepper"><button class="stepper-btn" data-adj="reps" data-dir="-1">−</button><div class="stepper-val" id="sv-reps">${state.reps}</div><button class="stepper-btn" data-adj="reps" data-dir="1">+</button></div>
       <div class="increments">${[1,2,5,10].map(v=>`<div class="inc-btn ${state.repsInc===v?'active':''}" data-rinc="${v}">${v}</div>`).join('')}</div></div>
     </div>
-    ${state.pendingSets.length?`<div class="card"><div class="card-title">Logged Sets</div><div class="section-gap">${state.pendingSets.map((s,i)=>`<div class="set-row"><div class="set-badge ${s.type}">${s.type==='warmup'?'WU':'W'+workingIdx(i)}</div><div class="set-info">${s.weight} lbs × ${s.reps} reps</div><button class="set-del" data-del="${i}">✕</button></div>`).join('')}</div></div>`:''}
+    ${state.pendingSets.length?`<div class="card"><div class="card-title">Logged Sets</div><div class="section-gap">${state.pendingSets.map((s,i)=>`<div class="set-row"><div class="set-badge ${s.type}">${s.type==='warmup'?'WU':'W'+workingIdx(i)}</div><div class="set-info">${fmtLift(s.weight)} × ${s.reps} reps</div><button class="set-del" data-del="${i}">✕</button></div>`).join('')}</div></div>`:''}
     <button class="btn btn-primary btn-full" id="log-set">+ Log Set</button>
     ${renderTimer()}
     <hr class="divider">
@@ -749,8 +801,9 @@ function renderExerciseHistory(exercise){
   if(!past.length) return '';
   past.sort((a,b)=>b.date-a.date);
   const shown=past.slice(0,8);
-  const overallBest=past.reduce((best,session)=>{ const s=session.sets.reduce((a,b)=>b.weight>a.weight||(b.weight===a.weight&&b.reps>a.reps)?b:a,session.sets[0]); return s.weight>best.weight||(s.weight===best.weight&&s.reps>best.reps)?s:best; },past[0].sets[0]);
-  return `<div style="margin-top:8px;border-top:2px dashed var(--border);padding-top:16px"><div class="card-title" style="margin-bottom:12px">Past Sessions — ${exercise}</div><div class="section-gap">${shown.map((session,idx)=>{ const best=session.sets.reduce((b,s)=>s.weight>b.weight||(s.weight===b.weight&&s.reps>b.reps)?s:b,session.sets[0]); const isPR=best.weight===overallBest.weight&&best.reps===overallBest.reps; return `<div style="background:var(--surface);border:1px solid ${idx===0?'var(--accent)':'var(--border)'};border-radius:var(--radius-sm);padding:10px 14px"><div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px"><div style="font-size:12px;font-weight:700;color:${idx===0?'var(--accent)':'var(--text-muted)'}">${idx===0?'Most Recent — ':''}${fmtDate(session.date)}</div>${isPR?`<div style="font-size:10px;font-weight:800;background:var(--amber-dim);color:var(--amber);border:1px solid var(--amber);border-radius:20px;padding:2px 7px">🏆 PR</div>`:''}</div><div style="font-size:13px;color:var(--text-muted);line-height:1.8">${session.sets.map(s=>`<span style="color:var(--text);font-weight:700">${s.weight}lbs</span> × ${s.reps}`).join(' &nbsp;·&nbsp; ')}</div><div style="font-size:11px;color:var(--text-muted);margin-top:4px">Best: ${best.weight}lbs × ${best.reps} &nbsp;·&nbsp; ${session.sets.length} set${session.sets.length!==1?'s':''}</div></div>`; }).join('')}</div></div>`;
+  const assisted=isAssisted(exercise);
+  let overallBest=null; past.forEach(session=>{ const s=bestSet(session.sets,assisted); if(betterPR(s,overallBest,assisted)) overallBest=s; });
+  return `<div style="margin-top:8px;border-top:2px dashed var(--border);padding-top:16px"><div class="card-title" style="margin-bottom:12px">Past Sessions — ${exercise}${assisted?' <span style="color:var(--accent)">· assisted</span>':''}</div><div class="section-gap">${shown.map((session,idx)=>{ const best=bestSet(session.sets,assisted); const isPR=best.weight===overallBest.weight&&best.reps===overallBest.reps; return `<div style="background:var(--surface);border:1px solid ${idx===0?'var(--accent)':'var(--border)'};border-radius:var(--radius-sm);padding:10px 14px"><div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px"><div style="font-size:12px;font-weight:700;color:${idx===0?'var(--accent)':'var(--text-muted)'}">${idx===0?'Most Recent — ':''}${fmtDate(session.date)}</div>${isPR?`<div style="font-size:10px;font-weight:800;background:var(--amber-dim);color:var(--amber);border:1px solid var(--amber);border-radius:20px;padding:2px 7px">🏆 PR</div>`:''}</div><div style="font-size:13px;color:var(--text-muted);line-height:1.8">${session.sets.map(s=>`<span style="color:var(--text);font-weight:700">${fmtLift(s.weight)}</span> × ${s.reps}`).join(' &nbsp;·&nbsp; ')}</div><div style="font-size:11px;color:var(--text-muted);margin-top:4px">Best: ${fmtLift(best.weight)} × ${best.reps} &nbsp;·&nbsp; ${session.sets.length} set${session.sets.length!==1?'s':''}</div></div>`; }).join('')}</div></div>`;
 }
 
 // ── CARDIO SCREENS ────────────────────────────────────────────────────────────
@@ -1030,7 +1083,7 @@ function renderHistory(){
               const parts=[ex.duration?fmtDuration(ex.duration):null,ex.distance?`${ex.distance} ${ex.distUnit}`:'',ex.heartRate?`♥ ${ex.heartRate} bpm`:''].filter(Boolean);
               return `<div class="history-exercise">Cardio — ${ex.name}</div><div class="history-sets">${parts.join(' · ')||'No details'}</div>`;
             }
-            return `<div class="history-exercise">${ex.muscle} — ${ex.name}</div><div class="history-sets">${ex.sets.map(set=>`${set.type==='warmup'?'WU':'●'} ${set.weight}lbs × ${set.reps}`).join('  ')}</div>`;
+            return `<div class="history-exercise">${ex.muscle} — ${ex.name}</div><div class="history-sets">${ex.sets.map(set=>`${set.type==='warmup'?'WU':'●'} ${fmtLift(set.weight)} × ${set.reps}`).join('  ')}</div>`;
           }).join('')}
         </div>`).join('')}
     `:state.historyTab==='records'?`
@@ -1040,8 +1093,8 @@ function renderHistory(){
             <div class="card pr-card" data-pr="${ex}" style="padding:12px 14px;cursor:pointer">
               <div style="display:flex;align-items:center;justify-content:space-between">
                 <div>
-                  <div style="font-size:12px;color:var(--text-muted);margin-bottom:4px">${ex}</div>
-                  <div style="font-size:22px;font-weight:800;color:var(--text)">${pr.weight} lbs × ${pr.reps}</div>
+                  <div style="font-size:12px;color:var(--text-muted);margin-bottom:4px">${ex}${isAssisted(ex)?' <span style="color:var(--accent);font-weight:700">· assisted</span>':''}</div>
+                  <div style="font-size:22px;font-weight:800;color:var(--text)">${fmtLift(pr.weight)} × ${pr.reps}</div>
                   <div style="font-size:11px;color:var(--text-muted);margin-top:3px">${fmtDate(pr.date)}</div>
                 </div>
                 <div style="color:var(--text-muted);font-size:20px;font-weight:300">›</div>
@@ -1155,8 +1208,8 @@ function renderVolumeTab(){
       ${opts.map(([v,l])=>`<button class="period-btn ${period===v?'active':''}" onclick="state.volumePeriod='${v}';render()">${l}</button>`).join('')}
     </div>
     ${rows.length===0?'<div class="empty">No working sets logged in this period.</div>':`
-      <div style="font-size:12px;color:var(--text-muted);text-align:center;margin:2px 0 6px">${Math.round(totalVol).toLocaleString()} lbs total volume · ${totalSets} working set${totalSets!==1?'s':''}</div>
-      <div class="card"><div class="section-gap">${rows.map(([m,d])=>{ const pct=maxVol>0?Math.round(d.volume/maxVol*100):0; return `<div><div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:4px"><span style="font-size:14px;font-weight:700;color:var(--text)">${esc(m)}</span><span style="font-size:13px;color:var(--text-muted)"><b style="color:var(--text)">${Math.round(d.volume).toLocaleString()}</b> lbs · ${d.sets} set${d.sets!==1?'s':''}</span></div><div class="macro-bar-wrap"><div class="macro-bar" style="width:${pct}%;background:var(--accent)"></div></div></div>`; }).join('')}</div></div>
+      <div style="font-size:12px;color:var(--text-muted);text-align:center;margin:2px 0 6px">${Math.round(state.liftUnit==='kg'?totalVol*0.453592:totalVol).toLocaleString()} ${liftUnitLabel()} total volume · ${totalSets} working set${totalSets!==1?'s':''}</div>
+      <div class="card"><div class="section-gap">${rows.map(([m,d])=>{ const pct=maxVol>0?Math.round(d.volume/maxVol*100):0; return `<div><div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:4px"><span style="font-size:14px;font-weight:700;color:var(--text)">${esc(m)}</span><span style="font-size:13px;color:var(--text-muted)"><b style="color:var(--text)">${Math.round(state.liftUnit==='kg'?d.volume*0.453592:d.volume).toLocaleString()}</b> ${liftUnitLabel()} · ${d.sets} set${d.sets!==1?'s':''}</span></div><div class="macro-bar-wrap"><div class="macro-bar" style="width:${pct}%;background:var(--accent)"></div></div></div>`; }).join('')}</div></div>
     `}`;
 }
 
@@ -1299,6 +1352,12 @@ function renderMore(){
       </div>
     </div>
 
+    <div class="card">
+      <div class="card-title">Exercises</div>
+      <div style="font-size:13px;color:var(--text-muted);margin-bottom:12px">Mark machine-assisted exercises (lower weight = better PR).</div>
+      <button class="btn btn-outline btn-full" id="exercise-settings-btn">Exercise Settings</button>
+    </div>
+
     ${isOwner()?`<div class="card">
       <div class="card-title">Invites</div>
       <div style="font-size:13px;color:var(--text-muted);margin-bottom:12px">Create invitation codes and QR codes to let new people join.</div>
@@ -1365,14 +1424,20 @@ function attachEvents(){
 
   document.querySelectorAll('[data-toggle]').forEach(b=>b.addEventListener('click',()=>{ state.setType=b.dataset.toggle; render(); }));
   document.querySelectorAll('[data-wunit]').forEach(b=>b.addEventListener('click',()=>{ state.weightUnit=b.dataset.wunit; localStorage.setItem('li_weight_unit',state.weightUnit); render(); }));
-  document.querySelectorAll('[data-adj]').forEach(b=>b.addEventListener('click',()=>{ const dir=parseInt(b.dataset.dir); if(b.dataset.adj==='weight'){ state.weight=Math.max(0,state.weight+dir*state.weightInc); const el=document.getElementById('sv-weight'); if(el) el.textContent=state.weight; } else{ state.reps=Math.max(1,state.reps+dir*state.repsInc); const el=document.getElementById('sv-reps'); if(el) el.textContent=state.reps; } }));
-  document.querySelectorAll('[data-winc]').forEach(b=>b.addEventListener('click',()=>{ state.weightInc=parseInt(b.dataset.winc); document.querySelectorAll('[data-winc]').forEach(x=>x.classList.toggle('active',parseInt(x.dataset.winc)===state.weightInc)); }));
+  document.querySelectorAll('[data-lunit]').forEach(b=>b.addEventListener('click',()=>{
+    const u=b.dataset.lunit; if(u===state.liftUnit) return;
+    // Convert the current stepper value so the physical weight is preserved.
+    state.weight = u==='kg' ? Math.round(state.weight*0.453592*2)/2 : Math.round(state.weight*2.20462);
+    state.liftUnit=u; localStorage.setItem('li_lift_unit',u); state.weightInc=5; render();
+  }));
+  document.querySelectorAll('[data-adj]').forEach(b=>b.addEventListener('click',()=>{ const dir=parseInt(b.dataset.dir); if(b.dataset.adj==='weight'){ state.weight=Math.max(0,+(state.weight+dir*state.weightInc).toFixed(2)); const el=document.getElementById('sv-weight'); if(el) el.textContent=state.weight; } else{ state.reps=Math.max(1,state.reps+dir*state.repsInc); const el=document.getElementById('sv-reps'); if(el) el.textContent=state.reps; } }));
+  document.querySelectorAll('[data-winc]').forEach(b=>b.addEventListener('click',()=>{ state.weightInc=parseFloat(b.dataset.winc); document.querySelectorAll('[data-winc]').forEach(x=>x.classList.toggle('active',parseFloat(x.dataset.winc)===state.weightInc)); }));
   document.querySelectorAll('[data-rinc]').forEach(b=>b.addEventListener('click',()=>{ state.repsInc=parseInt(b.dataset.rinc); document.querySelectorAll('[data-rinc]').forEach(x=>x.classList.toggle('active',parseInt(x.dataset.rinc)===state.repsInc)); }));
   document.querySelectorAll('[data-preset]').forEach(b=>b.addEventListener('click',()=>timerAdd(parseInt(b.dataset.preset))));
   el('timer-cancel',()=>{ timerStop(false); updateTimerDOM(); });
 
   el('log-set',()=>{
-    state.pendingSets.push({type:state.setType,weight:state.weight,reps:state.reps}); toast(`Set logged: ${state.weight}lbs × ${state.reps}`); render();
+    state.pendingSets.push({type:state.setType,weight:liftToLbs(state.weight),reps:state.reps}); toast(`Set logged: ${state.weight} ${liftUnitLabel()} × ${state.reps}`); render();
   });
   document.querySelectorAll('[data-del]').forEach(b=>b.addEventListener('click',()=>{ state.pendingSets.splice(parseInt(b.dataset.del),1); render(); }));
 
@@ -1443,6 +1508,7 @@ function attachEvents(){
   el('export-csv',exportAllCSV);
   el('logout-btn',handleLogout);
   el('update-password-btn', ()=>{ showUpdatePasswordModal(); });
+  el('exercise-settings-btn', showExerciseSettingsModal);
   el('manage-invites-btn', ()=>{ if(isOwner()) showInvitesModal(); });
   document.querySelectorAll('[data-theme]').forEach(b=>b.addEventListener('click',()=>{ setTheme(b.dataset.theme); render(); }));
   el('delete-account-btn',  ()=>{ showDeleteAccountModal(); });
@@ -1500,9 +1566,10 @@ function commitExercise(){
   if(!state._currentSession) state._currentSession={id:uid(),date:Date.now(),exercises:[]};
   const working=state.pendingSets.filter(s=>s.type==='working');
   if(working.length){
-    const best=working.reduce((a,b)=>b.weight>a.weight||(b.weight===a.weight&&b.reps>a.reps)?b:a);
+    const assisted=isAssisted(state.selectedExercise);
+    const best=bestSet(working,assisted);
     const pr=state.prs[state.selectedExercise];
-    if(!pr||best.weight>pr.weight||(best.weight===pr.weight&&best.reps>pr.reps)){
+    if(betterPR(best,pr,assisted)){
       state.prs[state.selectedExercise]={weight:best.weight,reps:best.reps,date:Date.now()};
       dbSavePR(state.selectedExercise,state.prs[state.selectedExercise]);
       toast('🏆 New PR!','var(--amber)');
@@ -1866,13 +1933,14 @@ function renderProgressChart(points){
 function showPRModal(exercise){
   const pr=state.prs[exercise];
   if(!pr) return;
+  const assisted=isAssisted(exercise);
   const history=[];
   state.sessions.forEach(s=>{
     s.exercises.forEach(ex=>{
       if(ex.name===exercise&&ex.type!=='cardio'){
         const working=(ex.sets||[]).filter(s=>s.type==='working');
         if(working.length){
-          const best=working.reduce((a,b)=>b.weight>a.weight||(b.weight===a.weight&&b.reps>a.reps)?b:a);
+          const best=bestSet(working,assisted);
           history.push({date:s.date,weight:best.weight,reps:best.reps,sets:working});
         }
       }
@@ -1886,7 +1954,7 @@ function showPRModal(exercise){
         <div style="padding:14px 20px;border-bottom:1px solid var(--border);display:flex;align-items:flex-start;justify-content:space-between">
           <div>
             <div class="modal-title" style="font-size:16px">${exercise}</div>
-            <div style="font-size:12px;color:var(--text-muted);margin-top:2px">PR: ${pr.weight} lbs × ${pr.reps} · ${fmtDate(pr.date)}</div>
+            <div style="font-size:12px;color:var(--text-muted);margin-top:2px">PR: ${fmtLift(pr.weight)} × ${pr.reps} · ${fmtDate(pr.date)}${assisted?' · <span style="color:var(--accent)">assisted</span>':''}</div>
           </div>
           <button id="modal-cancel" style="background:none;border:none;color:var(--text-muted);font-size:22px;cursor:pointer;padding:4px;flex-shrink:0">✕</button>
         </div>
@@ -1894,14 +1962,14 @@ function showPRModal(exercise){
           ${history.length>=2?`
             <div class="card-title" style="margin-bottom:8px">Weight Progression</div>
             <div style="background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:12px;margin-bottom:16px">
-              ${renderProgressChart(history.map(h=>({date:h.date,weight:h.weight})))}
+              ${renderProgressChart(history.map(h=>({date:h.date,weight:lbsToLift(h.weight)})))}
             </div>`:``}
           <div class="card-title" style="margin-bottom:8px">Session Log</div>
           <div class="section-gap">
             ${[...history].reverse().map(h=>`
               <div style="background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:10px 14px">
                 <div style="font-size:12px;color:var(--text-muted);margin-bottom:4px">${fmtDate(h.date)}</div>
-                <div style="font-size:13px;color:var(--text-muted)">${h.sets.map(s=>`<span style="color:var(--text);font-weight:700">${s.weight}lbs</span> × ${s.reps}`).join(' · ')}</div>
+                <div style="font-size:13px;color:var(--text-muted)">${h.sets.map(s=>`<span style="color:var(--text);font-weight:700">${fmtLift(s.weight)}</span> × ${s.reps}`).join(' · ')}</div>
               </div>`).join('')}
             ${history.length===0?'<div class="empty">No working sets logged yet</div>':''}
           </div>
@@ -1920,6 +1988,7 @@ function showAddExerciseModal(){
         <div class="modal-title">Add Exercise</div>
         <div style="font-size:13px;color:var(--text-muted);margin-bottom:4px">Adding to: <strong style="color:var(--text)">${muscle}</strong></div>
         <div class="field"><label>Exercise Name</label><input type="text" id="custom-ex-name" placeholder="e.g. Reverse Pec Deck" autocomplete="off"></div>
+        <label style="display:flex;align-items:flex-start;gap:10px;cursor:pointer;margin-bottom:4px"><input type="checkbox" id="custom-ex-assisted" style="width:auto;margin-top:3px;flex:0 0 auto"><span style="font-size:13px;color:var(--text);font-weight:600">Assisted <span style="color:var(--text-muted);font-weight:400">(lower weight = better PR)</span><div style="font-size:12px;color:var(--text-muted);font-weight:400;margin-top:3px">For machine-assisted moves like assisted pull-ups or dips, where less weight means more of your bodyweight.</div></span></label>
         <div class="btn-grid">
           <button class="btn btn-outline" id="modal-cancel">Cancel</button>
           <button class="btn btn-primary" id="save-custom-btn">Add</button>
@@ -1937,9 +2006,37 @@ function showAddExerciseModal(){
     if(allNames.some(n=>n.toLowerCase()===name.toLowerCase())){ toast('Exercise already exists','var(--red)'); return; }
     const entry={id:uid(),muscle,name,user_id:currentUser.id};
     state.customExercises.push(entry);
+    if(document.getElementById('custom-ex-assisted')?.checked) setAssisted(name,true);
     closeModal(); render();
     dbAddCustomExercise(muscle,name,entry.id);
   });
+}
+
+// Manage which exercises are "assisted" (lower weight = better PR). Reached from More.
+function allExerciseNames(){
+  const set=new Set();
+  if(typeof EXERCISES==='object'&&EXERCISES) Object.values(EXERCISES).forEach(arr=>(arr||[]).forEach(n=>set.add(n)));
+  state.customExercises.forEach(e=>set.add(e.name));
+  return [...set].sort((a,b)=>a.localeCompare(b));
+}
+let _exSetQ='';
+function exSettingsListHTML(){
+  const q=_exSetQ.trim().toLowerCase();
+  const names=allExerciseNames().filter(n=>!q||n.toLowerCase().includes(q));
+  if(!names.length) return '<div class="empty">No exercises match.</div>';
+  return names.map(n=>{ const on=isAssisted(n); return `<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:9px 2px;border-bottom:1px solid var(--border)"><span style="font-size:14px;color:var(--text);word-break:break-word">${esc(n)}</span><button class="btn ${on?'btn-primary':'btn-outline'}" data-ex-toggle="${esc(n)}" style="width:auto;padding:5px 12px;font-size:12px;flex:0 0 auto">${on?'Assisted ✓':'Normal'}</button></div>`; }).join('');
+}
+function showExerciseSettingsModal(){
+  document.getElementById('modal-root').innerHTML=`<div class="modal-overlay" id="modal-overlay"><div class="modal" style="max-height:88vh;overflow-y:auto"><div class="modal-title">Exercise Settings</div>
+    <div style="font-size:13px;color:var(--text-muted);margin-bottom:10px">Mark machine-assisted exercises so a <b>lower</b> weight counts as the better PR. Changing this recomputes that exercise's PR from your history.</div>
+    <div class="field" style="margin-bottom:6px"><input type="text" id="ex-set-search" placeholder="Search exercises…" autocomplete="off" value="${esc(_exSetQ)}"></div>
+    <div id="ex-set-list">${exSettingsListHTML()}</div>
+    <button class="btn btn-outline btn-full" id="modal-cancel" style="margin-top:12px">Close</button></div></div>`;
+  const wireRows=()=>{ document.querySelectorAll('[data-ex-toggle]').forEach(b=>b.addEventListener('click',()=>{ const n=b.dataset.exToggle; setAssisted(n,!isAssisted(n)); toast(isAssisted(n)?'Marked assisted — PR recomputed':'Marked normal — PR recomputed'); document.getElementById('ex-set-list').innerHTML=exSettingsListHTML(); wireRows(); })); };
+  document.getElementById('modal-cancel').addEventListener('click',()=>{ closeModal(); render(); });
+  document.getElementById('modal-overlay').addEventListener('click',e=>{ if(e.target===e.currentTarget){ closeModal(); render(); } });
+  document.getElementById('ex-set-search').addEventListener('input',e=>{ _exSetQ=e.target.value; document.getElementById('ex-set-list').innerHTML=exSettingsListHTML(); wireRows(); });
+  wireRows();
 }
 
 function inviteLink(code){ return `${location.origin}/?invite=${code}`; }
