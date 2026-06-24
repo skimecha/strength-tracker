@@ -269,7 +269,7 @@ async function deleteTicket(id){
   await loadSupportTickets(true); toast('Ticket deleted'); render();
 }
 
-const APP_VERSION = '2.21.1';
+const APP_VERSION = '2.21.2';
 const OWNER_UID     = '031a65ed-f52d-4a67-b271-47778e920c22';
 // Invite code from the URL (?invite=CODE) — drives the invite-only signup flow.
 let pendingInvite = new URLSearchParams(location.search).get('invite');
@@ -670,7 +670,23 @@ function safeRender(fn, name){
   }
 }
 
+const _scrollByView={}; let _prevScreenKey=null;
+// Identity of the current screen, including sub-screens, so scroll is only
+// restored across in-place re-renders — not when you actually navigate.
+function screenKey(){
+  switch(state.view){
+    case 'log':        return `log:${state.logStep}:${state.selectedMuscle||''}:${state.selectedExercise||''}`;
+    case 'nutrition':  return `nutrition:${state.nutritionView}`;
+    case 'bodyweight': return `bodyweight:${state.weightView}`;
+    case 'history':    return `history:${state.historyTab}`;
+    default:           return state.view;
+  }
+}
 function render(){
+  // Remember the active view's scroll so re-rendering (logging a set, toggling a
+  // favorite, sorting, etc.) doesn't fling the page back to the top.
+  const prev=document.querySelector('#views-wrap .view.active');
+  if(prev&&_prevScreenKey!=null) _scrollByView[_prevScreenKey]=prev.scrollTop;
   document.getElementById('nav-wrap').innerHTML=renderNav();
   document.getElementById('views-wrap').innerHTML=`
     <div class="view ${state.view==='log'?'active':''}">${safeRender(renderLog,'Workout')}</div>
@@ -681,6 +697,10 @@ function render(){
     <div class="view ${state.view==='admin'?'active':''}">${state.view==='admin'?safeRender(renderAdmin,'Admin'):''}</div>
     <div class="view ${state.view==='support'?'active':''}">${state.view==='support'?safeRender(renderSupport,'Support'):''}</div>`;
   attachEvents();
+  const key=screenKey();
+  const now=document.querySelector('#views-wrap .view.active');
+  if(now&&(key in _scrollByView)) now.scrollTop=_scrollByView[key];
+  _prevScreenKey=key;
 }
 
 function renderNav(){
