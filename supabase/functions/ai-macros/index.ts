@@ -65,7 +65,7 @@ const SYSTEM = `You estimate nutrition macros for foods a user logs in a fitness
 
 Unit handling:
 - Weight/volume units (g, oz, lb, ml, cup, tbsp, tsp, slice): estimate for that exact amount.
-- "units" means a count of average-sized items. "1 unit" of "Chicken Breast" = one average chicken breast; "5 units" of "Chicken Fingers" = five average chicken fingers. Scale by the count.
+- "servings" means standard servings/portions of the food, scaled by the count. Use the food's conventional serving size: for countable foods a serving is one average item ("1 serving" of "Chicken Breast" = one average breast; "5 servings" of "Chicken Fingers" = five fingers); for portion-based foods use the standard serving ("1 serving" of cooked rice ≈ 1 cup; oats ≈ 40-50 g dry; peanut butter ≈ 2 tbsp; cereal ≈ 1 cup). State the serving size you assumed in "basis". Scale by the count.
 
 If the food is specific enough to estimate reasonably, call provide_macros with your best estimate. Put any assumptions (preparation, size, brand-agnostic average) in "assumptions", and a short human-readable "basis" describing the amount you priced (e.g. "5 average chicken fingers (~140 g)").
 
@@ -182,7 +182,8 @@ Deno.serve(async (req) => {
     const key = Deno.env.get("ANTHROPIC_API_KEY");
     if (!key) return json({ error: "AI not configured" }, 500);
 
-    let userText = `Food: "${name}"\nAmount: ${qty} ${body.unit || "units"}`;
+    const unitText = (!body.unit || body.unit === "units") ? (qty === 1 ? "serving" : "servings") : body.unit;
+    let userText = `Food: "${name}"\nAmount: ${qty} ${unitText}`;
     if (body.clarification) userText += `\nAdditional detail: ${String(body.clarification).trim()}`;
 
     const res = await fetch("https://api.anthropic.com/v1/messages", {
