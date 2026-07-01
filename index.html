@@ -202,20 +202,24 @@ async function loadAdminMetrics(){
 }
 // Owner-only engagement metrics over state.activityDays. Same server gate as
 // admin_metrics. Returns counts only (never which users), owner excluded.
-let _activityLoading=false;
-async function loadAdminActivity(){
-  if(!isOwner()||_activityLoading) return;
-  _activityLoading=true;
-  let ok=false;
+let _activityReqDays=null;
+async function loadAdminActivity(force){
+  if(!isOwner()) return;
+  // Attempt at most once per selected window (guard against renderAdmin's
+  // unconditional call busy-looping). Retry via force (the Retry button) or by
+  // changing the period. Errors are surfaced, not swallowed into a silent hang.
+  if(!force && _activityReqDays===state.activityDays) return;
+  _activityReqDays=state.activityDays;
+  state.activityError=null;
   try{
     const {data,error}=await sb.rpc('admin_activity',{p_days:state.activityDays});
-    if(!error&&data){ state.adminActivity=data; ok=true; }
-  }catch(e){}
-  _activityLoading=false;
-  // Only re-render on success. On failure we must NOT render here — renderAdmin
-  // would re-trigger the load and busy-loop. It retries on the next render
-  // (period change / re-opening Admin) instead.
-  if(ok&&state.view==='admin') render();
+    if(error) throw error;
+    state.adminActivity=data;
+  }catch(e){
+    state.activityError=(e&&(e.message||e.hint||e.code))||'Unknown error';
+    console.error('admin_activity failed:',e);
+  }
+  if(state.view==='admin') render();
 }
 // Dev notes live in Supabase (public read, owner-only write). Loaded for every
 // user so the More page shows them; falls back to the hardcoded DEV_NOTES below
@@ -286,7 +290,7 @@ async function deleteTicket(id){
   await loadSupportTickets(true); toast('Ticket deleted'); render();
 }
 
-const APP_VERSION = '2.22.0';
+const APP_VERSION = '2.22.1';
 const OWNER_UID     = '031a65ed-f52d-4a67-b271-47778e920c22';
 // Invite code from the URL (?invite=CODE) — drives the invite-only signup flow.
 let pendingInvite = new URLSearchParams(location.search).get('invite');
@@ -330,7 +334,7 @@ let state = {
   setType:'working',weight:45,reps:10,weightInc:5,repsInc:1,
   pendingSets:[],_currentSession:null,
   sessions:[],prs:{},favorites:[],customExercises:[],exerciseSettings:{},
-  historyTab:'plan', volumePeriod:'week', goal: localStorage.getItem('li_goal')||'hypertrophy', strengthRedMode: localStorage.getItem('li_str_red')||'fixed', planTargets:{hypertrophy:{},strength:{}}, adminMetrics:null, adminActivity:null, activityDays:7, devNotes:null, supportTickets:null, supportError:null,
+  historyTab:'plan', volumePeriod:'week', goal: localStorage.getItem('li_goal')||'hypertrophy', strengthRedMode: localStorage.getItem('li_str_red')||'fixed', planTargets:{hypertrophy:{},strength:{}}, adminMetrics:null, adminActivity:null, activityDays:7, activityError:null, devNotes:null, supportTickets:null, supportError:null,
   weightView:'list', weightPeriod:'1m', liftUnit: localStorage.getItem('li_lift_unit') || 'lbs',
   nutritionView:'log', nutritionPeriod:'1m', calorieDisplay:'total', favSort: localStorage.getItem('li_fav_sort')||'recent',
   timer:{remaining:0,total:0,interval:null,running:false},
@@ -372,7 +376,7 @@ function resetAppState(){
   state.macroGoals={calories:2500,protein:180,carbs:250,fat:80};
   state.logStep='type'; state._currentSession=null; state.pendingSets=[]; state.view='log';
   swStop(); state.cardio={activity:null,stopwatch:{running:false,elapsed:0,interval:null},distance:'',distUnit:'mi',heartRate:null,hrTestStep:'idle',hrTestCountdown:0,hrTestInterval:null,hrBeats:''};
-  state.adminMetrics=null; _adminLoaded=false; state.adminActivity=null; state.devNotes=null; state.supportTickets=null; state.supportError=null; _supportLoaded=false;
+  state.adminMetrics=null; _adminLoaded=false; state.adminActivity=null; state.activityError=null; _activityReqDays=null; state.devNotes=null; state.supportTickets=null; state.supportError=null; _supportLoaded=false;
 }
 
 async function loadUserData(){
@@ -1335,7 +1339,7 @@ function renderAdmin(){
   if(!isOwner()){ state.view='more'; return ''; }
   loadAdminMetrics();
   loadSupportTickets();
-  if(!state.adminActivity||state.adminActivity.days!==state.activityDays) loadAdminActivity();
+  loadAdminActivity();  // internally guarded per-window; safe to call every render
   const m=state.adminMetrics;
   const stat=(v,l)=>`<div><div style="font-size:26px;font-weight:800;color:var(--text);line-height:1.1">${v??'—'}</div><div style="font-size:11px;color:var(--text-muted);margin-top:2px">${l}</div></div>`;
   const notes=getDevNotes();
@@ -1360,7 +1364,10 @@ function renderAdmin(){
       <div style="display:flex;gap:6px;overflow-x:auto;padding-bottom:6px;margin-bottom:10px">
         ${ACT_PERIODS.map(([d,l])=>`<button class="period-btn ${state.activityDays===d?'active':''}" data-actdays="${d}">${l}</button>`).join('')}
       </div>
-      ${A?`
+      ${state.activityError?`
+        <div style="font-size:13px;color:var(--red);margin-bottom:12px;word-break:break-word">Couldn't load activity: ${esc(state.activityError)}</div>
+        <button class="btn btn-outline" id="activity-retry-btn" style="width:auto;padding:6px 14px">Retry</button>`
+       :A?`
         <div style="font-size:11px;color:var(--text-muted);margin-bottom:10px">Unique users who did each thing in the last ${actLabel} — your account excluded.</div>
         <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:16px 12px">
           ${stat(A.active_users,'Active · any')}
@@ -1370,8 +1377,13 @@ function renderAdmin(){
           ${stat(A.nutrition_users,'Nutrition')}
           ${stat(A.weight_users,'Weight')}
           ${stat(A.plan_users,'Plan changes')}
+          ${stat(A.ai_users,'AI Macros')}
           ${stat(Math.max(0,(A.total_users||0)-(A.active_users||0)),'Dormant')}
-          ${stat(A.total_users,'Total users')}
+        </div>
+        <div style="display:flex;flex-wrap:wrap;gap:8px 18px;font-size:12px;color:var(--text-muted);margin-top:12px">
+          <span>Of active: <b style="color:var(--text)">${A.active_returning??'—'}</b> returning · <b style="color:var(--text)">${A.active_new??'—'}</b> new</span>
+          <span>Total users: <b style="color:var(--text)">${A.total_users??'—'}</b></span>
+          <span title="Daily active ÷ monthly active — how sticky usage is. Fixed 1-day vs 30-day window.">Stickiness (DAU/MAU): <b style="color:var(--text)">${A.mau>0?Math.round(A.dau/A.mau*100)+'%':'—'}</b> <span style="opacity:.7">(${A.dau??'—'}/${A.mau??'—'})</span></span>
         </div>
         <div style="border-top:1px solid var(--border);margin:14px 0 10px"></div>
         <div style="font-size:11px;color:var(--text-muted);margin-bottom:10px">Total events logged in the last ${actLabel}.</div>
@@ -1595,6 +1607,7 @@ function attachEvents(){
   el('note-post-btn', postDevNote);
   document.querySelectorAll('.dev-note-del').forEach(b=>b.addEventListener('click',()=>deleteDevNote(b.dataset.id)));
   document.querySelectorAll('[data-actdays]').forEach(b=>b.addEventListener('click',()=>{ state.activityDays=parseInt(b.dataset.actdays); render(); }));
+  el('activity-retry-btn', ()=>loadAdminActivity(true));
   el('open-support-btn', ()=>{ if(isOwner()){ state.view='support'; render(); } });
   el('support-back-btn', ()=>{ state.view='admin'; render(); });
   el('support-retry-btn', ()=>loadSupportTickets(true));
@@ -1766,7 +1779,12 @@ function showAddFoodModal(){
       const qty=parseFloat($('f-qty').value)||1, unit=$('f-unit').value;
       aiMacrosRecord({food:name,qty,unit,clarification:aiNotes.join('; '),calories:entry.calories,protein:entry.protein,carbs:entry.carbs,fat:entry.fat});
     }
-    state.foodLog.push(entry); closeModal(); render(); dbAddFood(entry);
+    state.foodLog.push(entry); closeModal(); render();
+    // Flag AI-assisted entries for the activity dashboard. Done as a separate,
+    // best-effort update after the insert commits, so it's backward-compatible:
+    // if the food_log.ai column isn't present yet the error is harmless and the
+    // food still saves.
+    dbAddFood(entry).then(()=>{ if(aiUsed) sb.from('food_log').update({ai:true}).eq('id',entry.id).then(null,()=>{}); });
   });
 }
 
