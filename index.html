@@ -206,12 +206,16 @@ let _activityLoading=false;
 async function loadAdminActivity(){
   if(!isOwner()||_activityLoading) return;
   _activityLoading=true;
+  let ok=false;
   try{
     const {data,error}=await sb.rpc('admin_activity',{p_days:state.activityDays});
-    if(!error&&data) state.adminActivity=data;
+    if(!error&&data){ state.adminActivity=data; ok=true; }
   }catch(e){}
   _activityLoading=false;
-  if(state.view==='admin') render();
+  // Only re-render on success. On failure we must NOT render here — renderAdmin
+  // would re-trigger the load and busy-loop. It retries on the next render
+  // (period change / re-opening Admin) instead.
+  if(ok&&state.view==='admin') render();
 }
 // Dev notes live in Supabase (public read, owner-only write). Loaded for every
 // user so the More page shows them; falls back to the hardcoded DEV_NOTES below
