@@ -200,6 +200,19 @@ async function loadAdminMetrics(){
     else _adminLoaded=false;  // allow a retry next time More opens (e.g. SQL not deployed yet)
   }catch(e){ _adminLoaded=false; }
 }
+// Owner-only engagement metrics over state.activityDays. Same server gate as
+// admin_metrics. Returns counts only (never which users), owner excluded.
+let _activityLoading=false;
+async function loadAdminActivity(){
+  if(!isOwner()||_activityLoading) return;
+  _activityLoading=true;
+  try{
+    const {data,error}=await sb.rpc('admin_activity',{p_days:state.activityDays});
+    if(!error&&data) state.adminActivity=data;
+  }catch(e){}
+  _activityLoading=false;
+  if(state.view==='admin') render();
+}
 // Dev notes live in Supabase (public read, owner-only write). Loaded for every
 // user so the More page shows them; falls back to the hardcoded DEV_NOTES below
 // if the table isn't present yet (e.g. before dev-notes-setup.sql is run).
@@ -269,7 +282,7 @@ async function deleteTicket(id){
   await loadSupportTickets(true); toast('Ticket deleted'); render();
 }
 
-const APP_VERSION = '2.21.3';
+const APP_VERSION = '2.22.0';
 const OWNER_UID     = '031a65ed-f52d-4a67-b271-47778e920c22';
 // Invite code from the URL (?invite=CODE) — drives the invite-only signup flow.
 let pendingInvite = new URLSearchParams(location.search).get('invite');
@@ -313,7 +326,7 @@ let state = {
   setType:'working',weight:45,reps:10,weightInc:5,repsInc:1,
   pendingSets:[],_currentSession:null,
   sessions:[],prs:{},favorites:[],customExercises:[],exerciseSettings:{},
-  historyTab:'plan', volumePeriod:'week', goal: localStorage.getItem('li_goal')||'hypertrophy', strengthRedMode: localStorage.getItem('li_str_red')||'fixed', planTargets:{hypertrophy:{},strength:{}}, adminMetrics:null, devNotes:null, supportTickets:null, supportError:null,
+  historyTab:'plan', volumePeriod:'week', goal: localStorage.getItem('li_goal')||'hypertrophy', strengthRedMode: localStorage.getItem('li_str_red')||'fixed', planTargets:{hypertrophy:{},strength:{}}, adminMetrics:null, adminActivity:null, activityDays:7, devNotes:null, supportTickets:null, supportError:null,
   weightView:'list', weightPeriod:'1m', liftUnit: localStorage.getItem('li_lift_unit') || 'lbs',
   nutritionView:'log', nutritionPeriod:'1m', calorieDisplay:'total', favSort: localStorage.getItem('li_fav_sort')||'recent',
   timer:{remaining:0,total:0,interval:null,running:false},
@@ -355,7 +368,7 @@ function resetAppState(){
   state.macroGoals={calories:2500,protein:180,carbs:250,fat:80};
   state.logStep='type'; state._currentSession=null; state.pendingSets=[]; state.view='log';
   swStop(); state.cardio={activity:null,stopwatch:{running:false,elapsed:0,interval:null},distance:'',distUnit:'mi',heartRate:null,hrTestStep:'idle',hrTestCountdown:0,hrTestInterval:null,hrBeats:''};
-  state.adminMetrics=null; _adminLoaded=false; state.devNotes=null; state.supportTickets=null; state.supportError=null; _supportLoaded=false;
+  state.adminMetrics=null; _adminLoaded=false; state.adminActivity=null; state.devNotes=null; state.supportTickets=null; state.supportError=null; _supportLoaded=false;
 }
 
 async function loadUserData(){
@@ -1318,9 +1331,13 @@ function renderAdmin(){
   if(!isOwner()){ state.view='more'; return ''; }
   loadAdminMetrics();
   loadSupportTickets();
+  if(!state.adminActivity||state.adminActivity.days!==state.activityDays) loadAdminActivity();
   const m=state.adminMetrics;
-  const stat=(v,l)=>`<div><div style="font-size:26px;font-weight:800;color:var(--text);line-height:1.1">${v}</div><div style="font-size:11px;color:var(--text-muted);margin-top:2px">${l}</div></div>`;
+  const stat=(v,l)=>`<div><div style="font-size:26px;font-weight:800;color:var(--text);line-height:1.1">${v??'—'}</div><div style="font-size:11px;color:var(--text-muted);margin-top:2px">${l}</div></div>`;
   const notes=getDevNotes();
+  const A=(state.adminActivity&&state.adminActivity.days===state.activityDays)?state.adminActivity:null;
+  const ACT_PERIODS=[[1,'1D'],[7,'1W'],[30,'1M'],[90,'3M'],[180,'6M'],[365,'1Y'],[730,'2Y']];
+  const actLabel={1:'day',7:'week',30:'month',90:'3 months',180:'6 months',365:'year',730:'2 years'}[state.activityDays]||`${state.activityDays} days`;
   const ta='min-height:120px;resize:vertical;font-size:14px;padding:10px 12px;border-radius:var(--radius-sm);width:100%;background:var(--surface2);border:1px solid var(--border);color:var(--text)';
   return `
     <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px">
@@ -1332,6 +1349,34 @@ function renderAdmin(){
       <div class="card-title">Users</div>
       ${m?`<div style="display:flex;gap:24px;flex-wrap:wrap">${stat(m.users??'—','Registered')}${stat(m.confirmed??'—','Confirmed')}${stat(m.new_7d??'—','New · 7d')}</div>`
          :`<div style="font-size:13px;color:var(--text-muted)">Loading…</div>`}
+    </div>
+
+    <div class="card">
+      <div class="card-title">Activity — last ${actLabel}</div>
+      <div style="display:flex;gap:6px;overflow-x:auto;padding-bottom:6px;margin-bottom:10px">
+        ${ACT_PERIODS.map(([d,l])=>`<button class="period-btn ${state.activityDays===d?'active':''}" data-actdays="${d}">${l}</button>`).join('')}
+      </div>
+      ${A?`
+        <div style="font-size:11px;color:var(--text-muted);margin-bottom:10px">Unique users who did each thing in the last ${actLabel} — your account excluded.</div>
+        <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:16px 12px">
+          ${stat(A.active_users,'Active · any')}
+          ${stat(A.logged_in,'Logged in')}
+          ${stat(A.new_signups,'New signups')}
+          ${stat(A.workouts_users,'Workouts')}
+          ${stat(A.nutrition_users,'Nutrition')}
+          ${stat(A.weight_users,'Weight')}
+          ${stat(A.plan_users,'Plan changes')}
+          ${stat(Math.max(0,(A.total_users||0)-(A.active_users||0)),'Dormant')}
+          ${stat(A.total_users,'Total users')}
+        </div>
+        <div style="border-top:1px solid var(--border);margin:14px 0 10px"></div>
+        <div style="font-size:11px;color:var(--text-muted);margin-bottom:10px">Total events logged in the last ${actLabel}.</div>
+        <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px">
+          ${stat(A.workouts_logged,'Workouts')}
+          ${stat(A.meals_logged,'Meals')}
+          ${stat(A.weighins,'Weigh-ins')}
+        </div>`
+       :`<div style="font-size:13px;color:var(--text-muted)">Loading…</div>`}
     </div>
 
     <div class="card">
@@ -1545,6 +1590,7 @@ function attachEvents(){
   el('admin-back-btn', ()=>{ state.view='more'; render(); });
   el('note-post-btn', postDevNote);
   document.querySelectorAll('.dev-note-del').forEach(b=>b.addEventListener('click',()=>deleteDevNote(b.dataset.id)));
+  document.querySelectorAll('[data-actdays]').forEach(b=>b.addEventListener('click',()=>{ state.activityDays=parseInt(b.dataset.actdays); render(); }));
   el('open-support-btn', ()=>{ if(isOwner()){ state.view='support'; render(); } });
   el('support-back-btn', ()=>{ state.view='admin'; render(); });
   el('support-retry-btn', ()=>loadSupportTickets(true));
