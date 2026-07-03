@@ -23,6 +23,32 @@
 import { createClient } from "jsr:@supabase/supabase-js@2";
 
 const MODEL = "claude-sonnet-4-6"; // accuracy upgrade; misses are rarer thanks to the cache
+const LABEL_MODEL = "claude-sonnet-4-6"; // vision — reading fine label text reliably matters
+
+const LABEL_SYSTEM = `You read Nutrition Facts labels from a photo and extract the macros.
+- Return values PER SERVING exactly as printed (not per container). If there are two columns (per serving / per container), use the per-serving column.
+- calories in kcal; protein, total carbohydrate, and total fat in grams.
+- If a product name/brand is clearly visible, include it in "name"; otherwise leave it empty.
+- Put the serving size exactly as printed in "serving" (e.g. "2 cookies (30 g)").
+- If the image is not a legible nutrition label, set readable=false and leave the macros at 0.`;
+
+const READ_LABEL_TOOL = {
+  name: "read_label",
+  description: "Return the per-serving nutrition facts read from the label image.",
+  input_schema: {
+    type: "object",
+    properties: {
+      readable: { type: "boolean", description: "true if a legible nutrition label was read; false otherwise" },
+      name: { type: "string", description: "Product/brand name if visible, else empty" },
+      serving: { type: "string", description: "Serving size exactly as printed, e.g. '2 cookies (30 g)'" },
+      calories: { type: "number", description: "Calories (kcal) per serving" },
+      protein: { type: "number", description: "Protein (g) per serving" },
+      carbs: { type: "number", description: "Total carbohydrate (g) per serving" },
+      fat: { type: "number", description: "Total fat (g) per serving" },
+    },
+    required: ["readable", "calories", "protein", "carbs", "fat"],
+  },
+};
 
 const cors = {
   "Access-Control-Allow-Origin": "*",
@@ -121,6 +147,49 @@ Deno.serve(async (req) => {
   try {
     const body = await req.json();
     const action = String(body.action || "estimate");
+
+    // ── label: read a Nutrition Facts photo and return per-serving macros ──────
+    if (action === "label") {
+      const key = Deno.env.get("ANTHROPIC_API_KEY");
+      if (!key) return json({ error: "AI not configured" }, 500);
+      const b64 = String(body.image || "");
+      const mediaType = String(body.mediaType || "image/jpeg");
+      if (!b64) return json({ error: "Missing image" }, 400);
+      if (b64.length > 7_000_000) return json({ error: "Image too large — try again" }, 413); // ~5 MB
+
+      const res = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: { "x-api-key": key, "anthropic-version": "2023-06-01", "content-type": "application/json" },
+        body: JSON.stringify({
+          model: LABEL_MODEL,
+          max_tokens: 512,
+          system: LABEL_SYSTEM,
+          tools: [READ_LABEL_TOOL],
+          tool_choice: { type: "tool", name: "read_label" },
+          messages: [{ role: "user", content: [
+            { type: "image", source: { type: "base64", media_type: mediaType, data: b64 } },
+            { type: "text", text: "Read this Nutrition Facts label and return the values PER SERVING." },
+          ] }],
+        }),
+      });
+      if (!res.ok) { const d = await res.text(); console.error("anthropic label error", res.status, d); return json({ error: "Label scan failed" }, 502); }
+      const data = await res.json();
+      const tool = (data.content || []).find((b: any) => b.type === "tool_use");
+      if (!tool) return json({ error: "No label read" }, 502);
+      const i = tool.input || {};
+      if (!i.readable) return json({ type: "unreadable" });
+      return json({
+        type: "macros",
+        name: String(i.name || ""),
+        serving: String(i.serving || ""),
+        calories: round5(num(i.calories)),
+        protein: round2(num(i.protein)),
+        carbs: round2(num(i.carbs)),
+        fat: round2(num(i.fat)),
+        source: "label",
+      });
+    }
+
     const name = String(body.food || "").trim();
     if (!name) return json({ error: "Missing food name" }, 400);
 
