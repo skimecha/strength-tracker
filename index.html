@@ -290,7 +290,7 @@ async function deleteTicket(id){
   await loadSupportTickets(true); toast('Ticket deleted'); render();
 }
 
-const APP_VERSION = '2.23.0';
+const APP_VERSION = '2.23.1';
 const OWNER_UID     = '031a65ed-f52d-4a67-b271-47778e920c22';
 // Invite code from the URL (?invite=CODE) — drives the invite-only signup flow.
 let pendingInvite = new URLSearchParams(location.search).get('invite');
@@ -332,7 +332,7 @@ let state = {
   view:'log',logStep:'workout',
   selectedMuscle:null,selectedExercise:null,selectedGroup:null,
   setType:'working',weight:45,reps:10,weightInc:5,repsInc:1,
-  pendingSets:[],_currentSession:null,
+  pendingSets:[],_currentSession:null,_resumedSnapshot:null,
   sessions:[],prs:{},favorites:[],customExercises:[],exerciseSettings:{},
   historyTab:'plan', volumePeriod:'week', goal: localStorage.getItem('li_goal')||'hypertrophy', strengthRedMode: localStorage.getItem('li_str_red')||'fixed', planTargets:{hypertrophy:{},strength:{}}, adminMetrics:null, adminActivity:null, activityDays:7, activityError:null, devNotes:null, supportTickets:null, supportError:null,
   weightView:'list', weightPeriod:'1m', liftUnit: localStorage.getItem('li_lift_unit') || 'lbs',
@@ -374,7 +374,7 @@ function resetAppState(){
   state.sessions=[]; state.prs={}; state.favorites=[]; state.exerciseSettings={}; state.planTargets={hypertrophy:{},strength:{}};
   state.foodLog=[]; state.mealFavorites=[]; state.weightLog=[];
   state.macroGoals={calories:2500,protein:180,carbs:250,fat:80};
-  state.logStep='type'; state._currentSession=null; state.pendingSets=[]; state.view='log';
+  state.logStep='type'; state._currentSession=null; state._resumedSnapshot=null; state.pendingSets=[]; state.view='log';
   swStop(); state.cardio={activity:null,stopwatch:{running:false,elapsed:0,interval:null},distance:'',distUnit:'mi',heartRate:null,hrTestStep:'idle',hrTestCountdown:0,hrTestInterval:null,hrBeats:''};
   state.adminMetrics=null; _adminLoaded=false; state.adminActivity=null; state.activityError=null; _activityReqDays=null; state.devNotes=null; state.supportTickets=null; state.supportError=null; _supportLoaded=false;
 }
@@ -1561,14 +1561,20 @@ function attachEvents(){
   el('finish-workout',()=>{
     commitExercise();
     if(state._currentSession?.exercises?.length){ const sess=state._currentSession; state.sessions.push(sess); dbSaveSession(sess); toast('Workout saved! 💪'); }
-    state._currentSession=null; state.pendingSets=[]; state.logStep='workout'; state.view='history'; render();
+    state._currentSession=null; state._resumedSnapshot=null; state.pendingSets=[]; state.logStep='workout'; state.view='history'; render();
   });
   el('finish-from-workout',()=>{
     if(state._currentSession?.exercises?.length){ const sess=state._currentSession; state.sessions.push(sess); dbSaveSession(sess); toast('Workout saved! 💪'); }
-    state._currentSession=null; state.pendingSets=[]; state.logStep='workout'; state.view='history'; render();
+    state._currentSession=null; state._resumedSnapshot=null; state.pendingSets=[]; state.logStep='workout'; state.view='history'; render();
   });
   el('cancel-workout',()=>{
-    if(confirm('Cancel workout? Unsaved sets will be lost.')){ swStop(); state._currentSession=null; state.pendingSets=[]; state.logStep='workout'; render(); }
+    if(confirm('Cancel workout? Unsaved sets will be lost.')){
+      swStop();
+      // A resumed workout's original is still safe in the DB — put it back in the
+      // list so cancelling never makes a previously-saved workout disappear.
+      if(state._resumedSnapshot){ state.sessions.push(state._resumedSnapshot); state._resumedSnapshot=null; }
+      state._currentSession=null; state.pendingSets=[]; state.logStep='workout'; render();
+    }
   });
 
   // Cardio activity selection
@@ -1699,8 +1705,11 @@ function resumeSession(sessionId){
   const s=state.sessions.find(s=>s.id===sessionId); if(!s) return;
   if(state._currentSession){ toast('Finish your current workout first','var(--red)'); return; }
   state._currentSession={id:s.id,date:s.date,exercises:JSON.parse(JSON.stringify(s.exercises))};
+  state._resumedSnapshot=JSON.parse(JSON.stringify(s));  // saved copy, so an abandoned/cancelled resume never loses data
   state.sessions=state.sessions.filter(x=>x.id!==s.id);
-  dbDeleteSession(s.id);
+  // Do NOT delete from the DB here. The original row stays until Finish & Save
+  // overwrites it (same id via upsert), so an interrupted resume can't lose the
+  // workout — a refresh/close simply reloads the original.
   const last=s.exercises[s.exercises.length-1];
   if(last?.type==='cardio'){
     state.logStep='workout';
