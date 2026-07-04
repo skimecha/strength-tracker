@@ -290,7 +290,7 @@ async function deleteTicket(id){
   await loadSupportTickets(true); toast('Ticket deleted'); render();
 }
 
-const APP_VERSION = '2.23.1';
+const APP_VERSION = '2.24.0';
 const OWNER_UID     = '031a65ed-f52d-4a67-b271-47778e920c22';
 // Invite code from the URL (?invite=CODE) — drives the invite-only signup flow.
 let pendingInvite = new URLSearchParams(location.search).get('invite');
@@ -355,7 +355,7 @@ let state = {
 // ─── AUTH ─────────────────────────────────────────────────────────────────────
 function showLoading(){ document.getElementById('screen-loading').style.display='flex'; document.getElementById('screen-auth').style.display='none'; document.getElementById('screen-app').style.display='none'; }
 function showAuth(view='login'){ document.getElementById('screen-loading').style.display='none'; document.getElementById('screen-auth').style.display='flex'; document.getElementById('screen-app').style.display='none'; renderAuth(view); }
-function showApp(){ document.getElementById('screen-loading').style.display='none'; document.getElementById('screen-auth').style.display='none'; document.getElementById('screen-app').style.display='flex'; render(); }
+function showApp(){ document.getElementById('screen-loading').style.display='none'; document.getElementById('screen-auth').style.display='none'; document.getElementById('screen-app').style.display='flex'; const restored=restoreDraft(); render(); if(restored) toast('Restored your in-progress workout'); }
 
 async function initAuth(){
   showLoading();
@@ -375,6 +375,7 @@ function resetAppState(){
   state.foodLog=[]; state.mealFavorites=[]; state.weightLog=[];
   state.macroGoals={calories:2500,protein:180,carbs:250,fat:80};
   state.logStep='type'; state._currentSession=null; state._resumedSnapshot=null; state.pendingSets=[]; state.view='log';
+  try{ localStorage.removeItem('li_workout_draft'); }catch(e){}
   swStop(); state.cardio={activity:null,stopwatch:{running:false,elapsed:0,interval:null},distance:'',distUnit:'mi',heartRate:null,hrTestStep:'idle',hrTestCountdown:0,hrTestInterval:null,hrBeats:''};
   state.adminMetrics=null; _adminLoaded=false; state.adminActivity=null; state.activityError=null; _activityReqDays=null; state.devNotes=null; state.supportTickets=null; state.supportError=null; _supportLoaded=false;
 }
@@ -749,6 +750,41 @@ function render(){
   const now=document.querySelector('#views-wrap .view.active');
   if(now&&(key in _scrollByView)) now.scrollTop=_scrollByView[key];
   _prevScreenKey=key;
+  persistDraft();
+}
+
+// ── In-progress workout autosave ───────────────────────────────────────────
+// The active workout lives only in memory until Finish & Save, so a refresh or
+// crash would lose it. Mirror it to localStorage on every render and restore it
+// on load. Device-local by design — an in-progress workout is a right-now thing.
+const DRAFT_KEY='li_workout_draft';
+function persistDraft(){
+  try{
+    if(state._currentSession || state.pendingSets.length){
+      localStorage.setItem(DRAFT_KEY, JSON.stringify({
+        v:1, cur:state._currentSession, snap:state._resumedSnapshot, pending:state.pendingSets,
+        group:state.selectedGroup, muscle:state.selectedMuscle, exercise:state.selectedExercise,
+        logStep:state.logStep, setType:state.setType,
+      }));
+    } else localStorage.removeItem(DRAFT_KEY);
+  }catch(e){}
+}
+function restoreDraft(){
+  if(state._currentSession || state.pendingSets.length) return false;  // don't clobber live state
+  let d; try{ d=JSON.parse(localStorage.getItem(DRAFT_KEY)||'null'); }catch(e){ d=null; }
+  if(!d || d.v!==1 || (!d.cur && !(d.pending&&d.pending.length))) return false;
+  state._currentSession=d.cur||null;
+  state._resumedSnapshot=d.snap||null;
+  state.pendingSets=Array.isArray(d.pending)?d.pending:[];
+  if(d.group!==undefined) state.selectedGroup=d.group;
+  if(d.muscle!==undefined) state.selectedMuscle=d.muscle;
+  if(d.exercise!==undefined) state.selectedExercise=d.exercise;
+  if(d.logStep) state.logStep=d.logStep;
+  if(d.setType) state.setType=d.setType;
+  // A resumed session is still in the DB, so loadUserData reloaded it — drop that
+  // copy from history so it isn't shown twice (it's the active workout now).
+  if(state._currentSession) state.sessions=state.sessions.filter(s=>s.id!==state._currentSession.id);
+  return true;
 }
 
 function renderNav(){
