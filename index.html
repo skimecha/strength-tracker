@@ -290,7 +290,7 @@ async function deleteTicket(id){
   await loadSupportTickets(true); toast('Ticket deleted'); render();
 }
 
-const APP_VERSION = '2.24.0';
+const APP_VERSION = '2.25.0';
 const OWNER_UID     = '031a65ed-f52d-4a67-b271-47778e920c22';
 // Invite code from the URL (?invite=CODE) — drives the invite-only signup flow.
 let pendingInvite = new URLSearchParams(location.search).get('invite');
@@ -810,14 +810,15 @@ function renderLog(){
 
 function renderWorkoutScreen(){
   const hasSets=state._currentSession?.exercises?.length;
-  const counts=weeklySetCounts(state.goal==='strength');
+  const inProgress=!!state._currentSession;
+  const counts=inProgress?sessionSetCounts(state.goal==='strength'):weeklySetCounts(state.goal==='strength');
   return `
     <div style="display:flex;align-items:baseline;justify-content:space-between"><div class="page-title">Log Workout</div>${versionStamp()}</div>
     <div class="subtitle">${fmtDate(Date.now())}</div>
     ${hasSets?`<div style="background:var(--accent-dim);border:1px solid var(--accent);border-radius:var(--radius-sm);padding:10px 14px;font-size:13px;color:var(--accent);font-weight:700">↩ Resuming ${fmtDate(state._currentSession.date)} — ${state._currentSession.exercises.length} exercise${state._currentSession.exercises.length!==1?'s':''} logged. Add more or finish.</div>`:''}
     <div>
       <div class="card-title" style="margin-bottom:10px">Strength Training</div>
-      <div class="muscle-grid">${Object.keys(GROUPS).map(g=>`<button class="muscle-btn" data-group="${g}">${g}${volBar(counts,GROUPS[g])}</button>`).join('')}</div>
+      <div class="muscle-grid">${Object.keys(GROUPS).map(g=>`<button class="muscle-btn" data-group="${g}">${g}${volBar(counts,GROUPS[g],inProgress)}</button>`).join('')}</div>
     </div>
     <div>
       <div class="card-title" style="margin-bottom:10px">Cardio</div>
@@ -828,14 +829,15 @@ function renderWorkoutScreen(){
 
 function renderGroupMuscleSelect(){
   const muscles=GROUPS[state.selectedGroup]||[];
-  const counts=weeklySetCounts(state.goal==='strength');
+  const inProgress=!!state._currentSession;
+  const counts=inProgress?sessionSetCounts(state.goal==='strength'):weeklySetCounts(state.goal==='strength');
   return `
     <div style="display:flex;align-items:center;gap:10px">
       <button class="btn btn-outline btn-sm" id="back-workout">← Back</button>
       <div class="page-title" style="font-size:20px">${state.selectedGroup}</div>
     </div>
     <div class="card"><div class="card-title">Select Muscle</div>
-      <div class="muscle-grid">${muscles.map(m=>`<button class="muscle-btn" data-muscle="${m}">${m}${volBar(counts,[m])}</button>`).join('')}</div>
+      <div class="muscle-grid">${muscles.map(m=>`<button class="muscle-btn" data-muscle="${m}">${m}${volBar(counts,[m],inProgress)}</button>`).join('')}</div>
     </div>`;
 }
 
@@ -1221,6 +1223,16 @@ function weeklySetCounts(strengthOnly){
   state.sessions.forEach(s=>{ if(s.date<start) return; (s.exercises||[]).forEach(ex=>{ if(ex.type==='cardio'||!ex.sets) return; const m=ex.muscle; if(!m) return; ex.sets.forEach(set=>{ if(set.type!=='working') return; if(strengthOnly && (parseInt(set.reps)||0)>6) return; c[m]=(c[m]||0)+1; }); }); });
   return c;
 }
+// Working-set counts for the in-progress workout only (committed exercises plus
+// the uncommitted sets for the muscle currently being logged). Drives the green
+// live bars shown while a workout is in progress.
+function sessionSetCounts(strengthOnly){
+  const c={}; const s=state._currentSession;
+  const add=(m,set)=>{ if(!m||set.type!=='working') return; if(strengthOnly && (parseInt(set.reps)||0)>6) return; c[m]=(c[m]||0)+1; };
+  if(s) (s.exercises||[]).forEach(ex=>{ if(ex.type==='cardio'||!ex.sets) return; ex.sets.forEach(set=>add(ex.muscle,set)); });
+  if(state.selectedMuscle) state.pendingSets.forEach(set=>add(state.selectedMuscle,set));
+  return c;
+}
 function setGoal(g){ state.goal=g; try{ localStorage.setItem('li_goal',g); }catch(e){} render(); }
 function setStrengthRedMode(m){ state.strengthRedMode=m; try{ localStorage.setItem('li_str_red',m); }catch(e){} render(); }
 function goalTargets(){ return (state.planTargets&&state.planTargets[state.goal])||{}; }
@@ -1247,13 +1259,13 @@ function volumeSegBar(did, ref, goal){
   return `<div class="macro-bar-wrap" style="display:flex">${segs}</div>`;
 }
 // Mini progress bar for a workout button. muscles = [m] for one muscle, or a group's muscle list. Hidden when goal is 'off'.
-function volBar(counts, muscles){
+function volBar(counts, muscles, green){
   if(state.goal==='off') return '';
   const tgts=goalTargets(); let sets=0, tgt=0;
   muscles.forEach(m=>{ sets+=counts[m]||0; tgt+=parseInt(tgts[m])||0; });
   const ref=tgt>0?tgt:muscles.length*goalUpper();
   const pct=ref>0?Math.min(100,Math.round(sets/ref*100)):0;
-  const color=volumeColor(sets/Math.max(1,muscles.length));
+  const color=green?'var(--green)':volumeColor(sets/Math.max(1,muscles.length));
   return `<div class="mbtn-bar"><div style="height:100%;width:${pct}%;background:${color}"></div></div>`;
 }
 function renderPlanTab(){
