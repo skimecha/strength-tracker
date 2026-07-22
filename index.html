@@ -290,7 +290,7 @@ async function deleteTicket(id){
   await loadSupportTickets(true); toast('Ticket deleted'); render();
 }
 
-const APP_VERSION = '2.25.0';
+const APP_VERSION = '2.25.1';
 const OWNER_UID     = '031a65ed-f52d-4a67-b271-47778e920c22';
 // Invite code from the URL (?invite=CODE) — drives the invite-only signup flow.
 let pendingInvite = new URLSearchParams(location.search).get('invite');
@@ -810,15 +810,15 @@ function renderLog(){
 
 function renderWorkoutScreen(){
   const hasSets=state._currentSession?.exercises?.length;
-  const inProgress=!!state._currentSession;
-  const counts=inProgress?sessionSetCounts(state.goal==='strength'):weeklySetCounts(state.goal==='strength');
+  const weekly=weeklySetCounts(state.goal==='strength');
+  const session=state._currentSession?sessionSetCounts(state.goal==='strength'):null;
   return `
     <div style="display:flex;align-items:baseline;justify-content:space-between"><div class="page-title">Log Workout</div>${versionStamp()}</div>
     <div class="subtitle">${fmtDate(Date.now())}</div>
     ${hasSets?`<div style="background:var(--accent-dim);border:1px solid var(--accent);border-radius:var(--radius-sm);padding:10px 14px;font-size:13px;color:var(--accent);font-weight:700">↩ Resuming ${fmtDate(state._currentSession.date)} — ${state._currentSession.exercises.length} exercise${state._currentSession.exercises.length!==1?'s':''} logged. Add more or finish.</div>`:''}
     <div>
       <div class="card-title" style="margin-bottom:10px">Strength Training</div>
-      <div class="muscle-grid">${Object.keys(GROUPS).map(g=>`<button class="muscle-btn" data-group="${g}">${g}${volBar(counts,GROUPS[g],inProgress)}</button>`).join('')}</div>
+      <div class="muscle-grid">${Object.keys(GROUPS).map(g=>`<button class="muscle-btn" data-group="${g}">${g}${volBar(weekly,GROUPS[g],session)}</button>`).join('')}</div>
     </div>
     <div>
       <div class="card-title" style="margin-bottom:10px">Cardio</div>
@@ -829,15 +829,15 @@ function renderWorkoutScreen(){
 
 function renderGroupMuscleSelect(){
   const muscles=GROUPS[state.selectedGroup]||[];
-  const inProgress=!!state._currentSession;
-  const counts=inProgress?sessionSetCounts(state.goal==='strength'):weeklySetCounts(state.goal==='strength');
+  const weekly=weeklySetCounts(state.goal==='strength');
+  const session=state._currentSession?sessionSetCounts(state.goal==='strength'):null;
   return `
     <div style="display:flex;align-items:center;gap:10px">
       <button class="btn btn-outline btn-sm" id="back-workout">← Back</button>
       <div class="page-title" style="font-size:20px">${state.selectedGroup}</div>
     </div>
     <div class="card"><div class="card-title">Select Muscle</div>
-      <div class="muscle-grid">${muscles.map(m=>`<button class="muscle-btn" data-muscle="${m}">${m}${volBar(counts,[m],inProgress)}</button>`).join('')}</div>
+      <div class="muscle-grid">${muscles.map(m=>`<button class="muscle-btn" data-muscle="${m}">${m}${volBar(weekly,[m],session)}</button>`).join('')}</div>
     </div>`;
 }
 
@@ -1259,14 +1259,17 @@ function volumeSegBar(did, ref, goal){
   return `<div class="macro-bar-wrap" style="display:flex">${segs}</div>`;
 }
 // Mini progress bar for a workout button. muscles = [m] for one muscle, or a group's muscle list. Hidden when goal is 'off'.
-function volBar(counts, muscles, green){
+function volBar(weekly, muscles, session){
   if(state.goal==='off') return '';
-  const tgts=goalTargets(); let sets=0, tgt=0;
-  muscles.forEach(m=>{ sets+=counts[m]||0; tgt+=parseInt(tgts[m])||0; });
+  const tgts=goalTargets(); let wSets=0, sSets=0, tgt=0;
+  muscles.forEach(m=>{ wSets+=weekly[m]||0; sSets+=(session&&session[m])||0; tgt+=parseInt(tgts[m])||0; });
   const ref=tgt>0?tgt:muscles.length*goalUpper();
-  const pct=ref>0?Math.min(100,Math.round(sets/ref*100)):0;
-  const color=green?'var(--green)':volumeColor(sets/Math.max(1,muscles.length));
-  return `<div class="mbtn-bar"><div style="height:100%;width:${pct}%;background:${color}"></div></div>`;
+  // Weekly (already-saved) volume, colored by band, then the in-progress session's
+  // sets appended in green so you can see where this session lands in the week.
+  const wPct=ref>0?Math.min(100,Math.round(wSets/ref*100)):0;
+  const sPct=ref>0?Math.max(0,Math.min(100-wPct,Math.round(sSets/ref*100))):0;
+  const wColor=volumeColor(wSets/Math.max(1,muscles.length));
+  return `<div class="mbtn-bar" style="display:flex"><div style="height:100%;width:${wPct}%;background:${wColor}"></div><div style="height:100%;width:${sPct}%;background:var(--green)"></div></div>`;
 }
 function renderPlanTab(){
   const goal=state.goal;
