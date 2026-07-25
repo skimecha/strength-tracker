@@ -78,11 +78,23 @@ Deno.serve(async (req) => {
 
     // 3. Seed profile + macro goals. The on_auth_user_created trigger does not
     //    fire for Admin-API-created users, so do it here (idempotent).
-    await admin.from("profiles").upsert({ id: uid, email }, { onConflict: "id" });
+    //    Trainer invites grant the trainer role at creation.
+    const role = inv.invite_type === "trainer" ? "trainer" : "user";
+    await admin.from("profiles").upsert({ id: uid, email, role }, { onConflict: "id" });
     await admin.from("macro_goals").upsert(
       { user_id: uid, ...OWNER_DEFAULTS },
       { onConflict: "user_id" },
     );
+
+    // 3b. Client invites carry the issuing trainer's id — auto-link on signup.
+    //     The link is a revocable grant (see trainer-setup.sql); no data
+    //     visibility is attached in Phase 1.
+    if (inv.invite_type === "client" && inv.trainer_id) {
+      await admin.from("trainer_clients").upsert(
+        { trainer_id: inv.trainer_id, client_id: uid, status: "active" },
+        { onConflict: "trainer_id,client_id" },
+      );
+    }
 
     // 4. Burn one use + record the redemption.
     await admin
