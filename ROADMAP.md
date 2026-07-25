@@ -41,7 +41,8 @@ touches RLS gets adversarial testing before it reaches real users.
 
 ## Phases
 
-### Phase 1 — Roles & links (plumbing)
+### Phase 1 — Roles & links (plumbing) — SHIPPED v2.26.0
+*(SQL: `supabase/trainer-setup.sql`; Edge Function: redeploy `redeem-invite`.)*
 - `profiles.role` / trainer flag (owner-granted).
 - `trainer_clients` link table (trainer_id, client_id, status, timestamps).
 - Invite generator gains a type: **Trainer** or **Client**. Client invites carry

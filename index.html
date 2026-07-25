@@ -185,6 +185,49 @@ function toggleTheme(){ setTheme(state.theme==='light'?'dark':'light'); render()
 // Version number + quick light/dark toggle, shown in every section header.
 function versionStamp(){ return `<div style="display:flex;align-items:center;gap:6px"><div style="font-size:10px;color:var(--text-muted);font-weight:600">v${APP_VERSION}</div><button onclick="toggleTheme()" title="Toggle light/dark mode" aria-label="Toggle light/dark mode" style="background:none;border:none;cursor:pointer;font-size:14px;line-height:1;padding:0;color:var(--text-muted)">${state.theme==='light'?'🌙':'☀️'}</button></div>`; }
 function isOwner(){ return currentUser?.id === OWNER_UID; }
+function isTrainer(){ return state.role==='trainer'; }
+// Trainer↔client links (Phase 1: relationship plumbing only — no data
+// visibility). Client list comes from the trainer_list_clients() RPC, which
+// only ever returns the caller's own links.
+async function loadClients(force){
+  if(!isTrainer()) return;
+  if(state.clients&&!force) return;
+  try{
+    const {data,error}=await sb.rpc('trainer_list_clients');
+    if(!error&&Array.isArray(data)){ state.clients=data; if(state.view==='log') render(); }
+  }catch(e){}
+}
+// Owner admin: grant/revoke trainer role and list trainers (owner-gated RPCs).
+async function setTrainerByEmail(enable){
+  const inp=document.getElementById('trainer-email'); const email=(inp?.value||'').trim();
+  if(!email){ toast('Enter an account email','var(--red)'); return; }
+  try{
+    const {data,error}=await sb.rpc('admin_set_trainer',{p_email:email,p_trainer:enable});
+    if(error) throw error;
+    if(!data||data.ok===false){ toast((data&&data.error)||'Could not update','var(--red)'); return; }
+    toast(enable?'Trainer granted ✓':'Trainer revoked');
+    if(inp) inp.value='';
+    refreshTrainerList();
+  }catch(e){ toast('Failed: '+(e.message||e),'var(--red)'); }
+}
+async function refreshTrainerList(){
+  const el2=document.getElementById('trainer-list'); if(!el2) return;
+  try{
+    const {data,error}=await sb.rpc('admin_list_trainers');
+    if(error) throw error;
+    const list=Array.isArray(data)?data:[];
+    el2.innerHTML=list.length
+      ? list.map(t=>`<div style="display:flex;justify-content:space-between;gap:8px;padding:3px 0"><span style="word-break:break-all;color:var(--text)">${esc(t.email)}</span><span style="flex-shrink:0">${t.active_clients} client${t.active_clients!==1?'s':''}</span></div>`).join('')
+      : 'No trainers yet.';
+  }catch(e){ el2.textContent='Could not load trainers (run trainer-setup.sql).'; }
+}
+async function removeClientLink(clientId){
+  if(!isTrainer()||!clientId) return;
+  if(!confirm('Remove this client? They keep their account and all their data — this only ends your link to them.')) return;
+  const {error}=await sb.from('trainer_clients').update({status:'removed',updated_at:new Date().toISOString()}).eq('trainer_id',currentUser.id).eq('client_id',clientId);
+  if(error){ toast('Could not remove: '+error.message,'var(--red)'); return; }
+  await loadClients(true); state.logStep='trainer-home'; state.selectedClient=null; toast('Client removed'); render();
+}
 // Owner-only metrics. The call is gated client-side on isOwner() so a normal
 // user's browser never even makes the request — but the real lock is the
 // server: admin_metrics() (security definer) checks auth.uid() and returns
@@ -290,7 +333,7 @@ async function deleteTicket(id){
   await loadSupportTickets(true); toast('Ticket deleted'); render();
 }
 
-const APP_VERSION = '2.25.1';
+const APP_VERSION = '2.26.0';
 const OWNER_UID     = '031a65ed-f52d-4a67-b271-47778e920c22';
 // Invite code from the URL (?invite=CODE) — drives the invite-only signup flow.
 let pendingInvite = new URLSearchParams(location.search).get('invite');
@@ -334,6 +377,7 @@ let state = {
   setType:'working',weight:45,reps:10,weightInc:5,repsInc:1,
   pendingSets:[],_currentSession:null,_resumedSnapshot:null,
   sessions:[],prs:{},favorites:[],customExercises:[],exerciseSettings:{},
+  role:'user', clients:null, selectedClient:null,
   historyTab:'plan', volumePeriod:'week', goal: localStorage.getItem('li_goal')||'hypertrophy', strengthRedMode: localStorage.getItem('li_str_red')||'fixed', planTargets:{hypertrophy:{},strength:{}}, adminMetrics:null, adminActivity:null, activityDays:7, activityError:null, devNotes:null, supportTickets:null, supportError:null,
   weightView:'list', weightPeriod:'1m', liftUnit: localStorage.getItem('li_lift_unit') || 'lbs',
   nutritionView:'log', nutritionPeriod:'1m', calorieDisplay:'total', favSort: localStorage.getItem('li_fav_sort')||'recent',
@@ -378,6 +422,7 @@ function resetAppState(){
   try{ localStorage.removeItem('li_workout_draft'); }catch(e){}
   swStop(); state.cardio={activity:null,stopwatch:{running:false,elapsed:0,interval:null},distance:'',distUnit:'mi',heartRate:null,hrTestStep:'idle',hrTestCountdown:0,hrTestInterval:null,hrBeats:''};
   state.adminMetrics=null; _adminLoaded=false; state.adminActivity=null; state.activityError=null; _activityReqDays=null; state.devNotes=null; state.supportTickets=null; state.supportError=null; _supportLoaded=false;
+  state.role='user'; state.clients=null; state.selectedClient=null;
 }
 
 async function loadUserData(){
@@ -416,6 +461,9 @@ async function loadUserData(){
     await loadDevNotes();  // separate so a missing dev_notes table never aborts the main load
     // Per-exercise settings (assisted flag). Isolated so a missing table never aborts the load.
     try{ const es=await sb.from('exercise_settings').select('exercise,assisted').eq('user_id',userId); if(!es.error&&Array.isArray(es.data)){ const m={}; es.data.forEach(r=>{ m[r.exercise]={assisted:!!r.assisted}; }); state.exerciseSettings=m; } }catch(e){ state.exerciseSettings={}; }
+    // Role (trainer plumbing). Isolated: a missing role column just means 'user'.
+    try{ const pr=await sb.from('profiles').select('role').eq('id',userId).maybeSingle(); state.role=(pr.data&&pr.data.role)||'user'; }catch(e){ state.role='user'; }
+    if(isTrainer()&&(state.logStep==='workout'||state.logStep==='type')&&!state._currentSession) state.logStep='trainer-home';
     console.log('Loaded — sessions:',state.sessions.length,'prs:',Object.keys(state.prs).length);
   } catch(err){
     console.error('loadUserData exception:',err);
@@ -621,9 +669,14 @@ async function dbSaveMacros(){
 }
 // ── Invites (owner only; RLS enforces it) ──
 function genInviteCode(){ const c='ABCDEFGHJKMNPQRSTUVWXYZ23456789'; let s=''; for(let i=0;i<6;i++) s+=c[Math.floor(Math.random()*c.length)]; return 'LOCKIN-'+s; }
-async function dbCreateInviteCode(label, maxUses){
+async function dbCreateInviteCode(label, maxUses, inviteType, trainerId){
   const code=genInviteCode();
-  const {error}=await sb.from('invite_codes').insert({code, label:label||null, max_uses:maxUses||1, used_count:0, created_by:currentUser.id});
+  const row={code, label:label||null, max_uses:maxUses||1, used_count:0, created_by:currentUser.id};
+  // Only send the typed columns when needed, so standard invites keep working
+  // even before trainer-setup.sql has been run.
+  if(inviteType&&inviteType!=='user') row.invite_type=inviteType;
+  if(trainerId) row.trainer_id=trainerId;
+  const {error}=await sb.from('invite_codes').insert(row);
   if(error){ toast('Could not create code: '+error.message,'var(--red)'); return null; }
   return code;
 }
@@ -800,12 +853,51 @@ function renderNav(){
 
 // ── LOG ───────────────────────────────────────────────────────────────────────
 function renderLog(){
+  if(isTrainer()&&state.logStep==='trainer-home')   return renderTrainerHome();
+  if(isTrainer()&&state.logStep==='trainer-client') return renderTrainerClient();
   if(state.logStep==='workout')     return renderWorkoutScreen();
   if(state.logStep==='muscle')      return renderGroupMuscleSelect();
   if(state.logStep==='exercise')    return renderExerciseSelect();
   if(state.logStep==='sets')        return renderSets();
   if(state.logStep==='cardio-log')  return renderCardioLog();
-  return renderWorkoutScreen();
+  return isTrainer()?renderTrainerHome():renderWorkoutScreen();
+}
+
+// ── TRAINER SCREENS (Phase 1) ────────────────────────────────────────────────
+function renderTrainerHome(){
+  loadClients();
+  const active=(state.clients||[]).filter(c=>c.status==='active');
+  return `
+    <div style="display:flex;align-items:baseline;justify-content:space-between"><div class="page-title">Clients</div>${versionStamp()}</div>
+    <div class="subtitle">${fmtDate(Date.now())}</div>
+    <div class="muscle-grid">
+      <button class="muscle-btn" id="trainer-my-training" style="border-color:var(--accent)">💪 My Training</button>
+      ${state.clients===null?'<div class="empty" style="grid-column:1/-1">Loading clients…</div>'
+        :active.map(c=>`<button class="muscle-btn" data-client="${esc(c.client_id)}" style="word-break:break-all">${esc(c.email||'(no email)')}</button>`).join('')}
+    </div>
+    ${state.clients!==null&&!active.length?'<div class="empty">No clients yet — add your first below.</div>':''}
+    <button class="btn btn-primary btn-full" id="add-client-btn">＋ Add Client</button>
+    <div style="font-size:12px;color:var(--text-muted);text-align:center;line-height:1.5">Adding a client creates an invite code. When they sign up with it, they get their own full account linked to you.</div>`;
+}
+function renderTrainerClient(){
+  const c=(state.clients||[]).find(x=>x.client_id===state.selectedClient);
+  if(!c) { state.logStep='trainer-home'; return renderTrainerHome(); }
+  return `
+    <div style="display:flex;align-items:center;gap:10px">
+      <button class="btn btn-outline btn-sm" id="back-trainer-home">← Clients</button>
+      <div class="page-title" style="font-size:18px;word-break:break-all">${esc(c.email||'Client')}</div>
+    </div>
+    <div class="card">
+      <div class="card-title">Client</div>
+      <div style="font-size:14px;color:var(--text);word-break:break-all;margin-bottom:4px">${esc(c.email||'')}</div>
+      <div style="font-size:12px;color:var(--text-muted)">Linked ${c.linked_at?fmtDate(new Date(c.linked_at).getTime()):''}</div>
+    </div>
+    <div class="card">
+      <div class="card-title">Coaching View</div>
+      <div style="font-size:13px;color:var(--text-muted);line-height:1.6">Coming next: see this client's workouts (with their permission) and assign weekly plans.</div>
+    </div>
+    <button class="btn btn-danger btn-full" id="remove-client-btn">Remove Client</button>
+    <div style="font-size:12px;color:var(--text-muted);text-align:center;line-height:1.5">Removing only ends your link. Their account and data stay theirs.</div>`;
 }
 
 function renderWorkoutScreen(){
@@ -813,7 +905,7 @@ function renderWorkoutScreen(){
   const weekly=weeklySetCounts(state.goal==='strength');
   const session=state._currentSession?sessionSetCounts(state.goal==='strength'):null;
   return `
-    <div style="display:flex;align-items:baseline;justify-content:space-between"><div class="page-title">Log Workout</div>${versionStamp()}</div>
+    <div style="display:flex;align-items:baseline;justify-content:space-between"><div style="display:flex;align-items:center;gap:10px">${isTrainer()?'<button class="btn btn-outline btn-sm" id="back-trainer-home">← Clients</button>':''}<div class="page-title">Log Workout</div></div>${versionStamp()}</div>
     <div class="subtitle">${fmtDate(Date.now())}</div>
     ${hasSets?`<div style="background:var(--accent-dim);border:1px solid var(--accent);border-radius:var(--radius-sm);padding:10px 14px;font-size:13px;color:var(--accent);font-weight:700">↩ Resuming ${fmtDate(state._currentSession.date)} — ${state._currentSession.exercises.length} exercise${state._currentSession.exercises.length!==1?'s':''} logged. Add more or finish.</div>`:''}
     <div>
@@ -1474,6 +1566,17 @@ function renderAdmin(){
     </div>
 
     <div class="card">
+      <div class="card-title">Trainers</div>
+      <div style="font-size:13px;color:var(--text-muted);margin-bottom:10px">Grant or revoke trainer status by account email.</div>
+      <div class="field" style="margin-bottom:8px"><input type="email" id="trainer-email" placeholder="user@example.com"></div>
+      <div class="btn-grid">
+        <button class="btn btn-primary" id="grant-trainer-btn">Grant Trainer</button>
+        <button class="btn btn-outline" id="revoke-trainer-btn">Revoke</button>
+      </div>
+      <div id="trainer-list" style="margin-top:12px;font-size:13px;color:var(--text-muted)">Loading trainers…</div>
+    </div>
+
+    <div class="card">
       <div class="card-title">Support</div>
       <div style="font-size:13px;color:var(--text-muted);margin-bottom:12px">Read and triage messages sent from the support form.${openTicketBadge()}</div>
       <button class="btn btn-primary btn-full" id="open-support-btn">Support Tickets</button>
@@ -1580,6 +1683,13 @@ function attachEvents(){
   document.querySelectorAll('[data-exercise]').forEach(b=>b.addEventListener('click',e=>{ if(e.target.closest('[data-fav]')) return; state.selectedExercise=b.dataset.exercise; state.pendingSets=[]; state.logStep='sets'; render(); }));
 
   document.querySelectorAll('[data-fav]').forEach(b=>b.addEventListener('click',async e=>{ e.stopPropagation(); const ex=b.dataset.fav; const idx=state.favorites.indexOf(ex); if(idx>=0) state.favorites.splice(idx,1); else state.favorites.push(ex); render(); dbToggleExFav(ex); }));
+
+  // Trainer home (Phase 1)
+  el('trainer-my-training',()=>{ state.logStep='workout'; render(); });
+  el('back-trainer-home',()=>{ state.logStep='trainer-home'; state.selectedClient=null; render(); });
+  el('add-client-btn',()=>{ showAddClientModal(); });
+  el('remove-client-btn',()=>{ removeClientLink(state.selectedClient); });
+  document.querySelectorAll('[data-client]').forEach(b=>b.addEventListener('click',()=>{ state.selectedClient=b.dataset.client; state.logStep='trainer-client'; render(); }));
 
   el('back-workout',()=>{ state.logStep='workout'; state.searchQ=''; render(); });
   el('back-muscle', ()=>{ state.logStep='muscle';  state.searchQ=''; render(); });
@@ -1692,6 +1802,9 @@ function attachEvents(){
   document.querySelectorAll('.dev-note-del').forEach(b=>b.addEventListener('click',()=>deleteDevNote(b.dataset.id)));
   document.querySelectorAll('[data-actdays]').forEach(b=>b.addEventListener('click',()=>{ state.activityDays=parseInt(b.dataset.actdays); render(); }));
   el('activity-retry-btn', ()=>loadAdminActivity(true));
+  el('grant-trainer-btn', ()=>setTrainerByEmail(true));
+  el('revoke-trainer-btn', ()=>setTrainerByEmail(false));
+  if(isOwner()&&state.view==='admin') refreshTrainerList();
   el('open-support-btn', ()=>{ if(isOwner()){ state.view='support'; render(); } });
   el('support-back-btn', ()=>{ state.view='admin'; render(); });
   el('support-retry-btn', ()=>loadSupportTickets(true));
@@ -2270,13 +2383,14 @@ async function showInvitesModal(highlightCode){
           </div>`:''}
         <div class="field"><label>Label (optional)</label><input type="text" id="inv-label" placeholder="e.g. gym buddy, street sticker"></div>
         <div class="field"><label>Max uses</label><input type="number" id="inv-uses" value="1" min="1" inputmode="numeric"></div>
+        <div class="field"><label>Invite type</label><select id="inv-type" class="select"><option value="user">Standard user</option><option value="trainer">Trainer</option></select></div>
         <button class="btn btn-primary btn-full" id="inv-generate">Generate Invite</button>
         ${codes.length?`<div class="card-title" style="margin-top:8px">Your codes</div>
           <div class="section-gap">${codes.map(c=>{ const used=c.used_count>=c.max_uses; return `
             <div style="display:flex;align-items:center;justify-content:space-between;gap:8px">
               <div style="min-width:0">
                 <div style="font-family:monospace;font-size:13px;font-weight:700;color:${used?'var(--text-muted)':'var(--text)'}">${c.code}</div>
-                <div style="font-size:11px;color:var(--text-muted)">${c.label?c.label+' · ':''}${c.used_count}/${c.max_uses} used${used?' · spent':''}</div>
+                <div style="font-size:11px;color:var(--text-muted)">${c.label?c.label+' · ':''}${c.invite_type&&c.invite_type!=='user'?c.invite_type+' · ':''}${c.used_count}/${c.max_uses} used${used?' · spent':''}</div>
               </div>
               <div style="display:flex;gap:6px;flex-shrink:0">
                 <button class="btn btn-outline btn-xs" data-qr="${c.code}">QR</button>
@@ -2291,13 +2405,65 @@ async function showInvitesModal(highlightCode){
   document.getElementById('inv-generate').addEventListener('click',async()=>{
     const label=document.getElementById('inv-label').value.trim();
     const uses=Math.max(1,parseInt(document.getElementById('inv-uses').value)||1);
+    const type=document.getElementById('inv-type').value;
     const btn=document.getElementById('inv-generate'); btn.disabled=true; btn.textContent='Generating…';
-    const code=await dbCreateInviteCode(label,uses);
+    const code=await dbCreateInviteCode(label,uses,type);
     if(code) showInvitesModal(code); else { btn.disabled=false; btn.textContent='Generate Invite'; }
   });
   document.querySelectorAll('[data-copy]').forEach(b=>b.addEventListener('click',()=>navigator.clipboard.writeText(inviteLink(b.dataset.copy)).then(()=>toast('Link copied!'),()=>toast('Copy failed','var(--red)'))));
   document.querySelectorAll('[data-share]').forEach(b=>b.addEventListener('click',()=>shareInvite(b.dataset.share)));
   document.querySelectorAll('[data-qr]').forEach(b=>b.addEventListener('click',()=>showInvitesModal(b.dataset.qr)));
+}
+// Trainer: create a client invite. Redeeming it creates the client's own full
+// account, auto-linked to this trainer (RLS restricts trainers to client-type
+// codes carrying their own id).
+async function showAddClientModal(highlightCode){
+  if(!isTrainer()) return;
+  const codes=(await dbLoadInviteCodes()).filter(c=>c.invite_type==='client');
+  const hi=highlightCode ? codes.find(c=>c.code===highlightCode) : null;
+  document.getElementById('modal-root').innerHTML=`
+    <div class="modal-overlay" id="modal-overlay">
+      <div class="modal" style="max-height:88vh;overflow-y:auto">
+        <div class="modal-title">Add Client</div>
+        <div style="font-size:13px;color:var(--text-muted);line-height:1.5;margin-bottom:4px">Generate an invite and send it to your client. When they sign up with it, they get their own account — linked to you.</div>
+        ${hi?`
+          <div style="text-align:center;background:var(--surface2);border:1px solid var(--accent);border-radius:var(--radius-sm);padding:14px">
+            <img src="${inviteQR(hi.code)}" alt="Invite QR code" width="200" height="200" style="border-radius:8px;background:#fff;padding:8px;width:200px;height:200px">
+            <div style="font-family:monospace;font-weight:800;color:var(--text);margin-top:10px;font-size:15px">${hi.code}</div>
+            <div style="font-size:11px;color:var(--text-muted);word-break:break-all;margin-top:4px">${inviteLink(hi.code)}</div>
+            <div class="btn-grid" style="margin-top:12px">
+              <button class="btn btn-outline" data-copy="${hi.code}">Copy link</button>
+              <button class="btn btn-primary" data-share="${hi.code}">Share</button>
+            </div>
+          </div>`:''}
+        <div class="field"><label>Label (optional)</label><input type="text" id="cinv-label" placeholder="e.g. client's name"></div>
+        <button class="btn btn-primary btn-full" id="cinv-generate">Generate Client Invite</button>
+        ${codes.length?`<div class="card-title" style="margin-top:8px">Your client invites</div>
+          <div class="section-gap">${codes.map(c=>{ const used=c.used_count>=c.max_uses; return `
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:8px">
+              <div style="min-width:0">
+                <div style="font-family:monospace;font-size:13px;font-weight:700;color:${used?'var(--text-muted)':'var(--text)'}">${c.code}</div>
+                <div style="font-size:11px;color:var(--text-muted)">${c.label?esc(c.label)+' · ':''}${used?'used ✓':'unused'}</div>
+              </div>
+              <div style="display:flex;gap:6px;flex-shrink:0">
+                <button class="btn btn-outline btn-xs" data-qr="${c.code}">QR</button>
+                <button class="btn btn-outline btn-xs" data-copy="${c.code}">Copy</button>
+              </div>
+            </div>`; }).join('<hr class="divider" style="margin:2px 0">')}</div>`:''}
+        <button class="btn btn-outline btn-full" id="modal-cancel" style="margin-top:8px">Close</button>
+      </div>
+    </div>`;
+  document.getElementById('modal-cancel').addEventListener('click',()=>{ closeModal(); loadClients(true); });
+  document.getElementById('modal-overlay').addEventListener('click',e=>{ if(e.target===e.currentTarget){ closeModal(); loadClients(true); } });
+  document.getElementById('cinv-generate').addEventListener('click',async()=>{
+    const label=document.getElementById('cinv-label').value.trim();
+    const btn=document.getElementById('cinv-generate'); btn.disabled=true; btn.textContent='Generating…';
+    const code=await dbCreateInviteCode(label,1,'client',currentUser.id);
+    if(code) showAddClientModal(code); else { btn.disabled=false; btn.textContent='Generate Client Invite'; }
+  });
+  document.querySelectorAll('[data-copy]').forEach(b=>b.addEventListener('click',()=>navigator.clipboard.writeText(inviteLink(b.dataset.copy)).then(()=>toast('Link copied!'),()=>toast('Copy failed','var(--red)'))));
+  document.querySelectorAll('[data-share]').forEach(b=>b.addEventListener('click',()=>shareInvite(b.dataset.share)));
+  document.querySelectorAll('[data-qr]').forEach(b=>b.addEventListener('click',()=>showAddClientModal(b.dataset.qr)));
 }
 function closeModal(){ document.getElementById('modal-root').innerHTML=''; }
 
