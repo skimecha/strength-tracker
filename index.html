@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="theme-color" content="#0f1117">
+<meta name="theme-color" content="#f4f6fb">
 <title>Lock In: Strength</title>
 <link rel="manifest" href="manifest.json">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -388,7 +388,7 @@ async function deleteTicket(id){
   await loadSupportTickets(true); toast('Ticket deleted'); render();
 }
 
-const APP_VERSION = '2.27.0';
+const APP_VERSION = '2.27.1';
 const OWNER_UID     = '031a65ed-f52d-4a67-b271-47778e920c22';
 // Invite code from the URL (?invite=CODE) — drives the invite-only signup flow.
 let pendingInvite = new URLSearchParams(location.search).get('invite');
@@ -442,7 +442,7 @@ let state = {
   foodLog:[],mealFavorites:[],
   weightLog:[],
   weightUnit: localStorage.getItem('li_weight_unit') || 'lbs',
-  theme: localStorage.getItem('li_theme') || 'dark',
+  theme: localStorage.getItem('li_theme') || 'light',
   design: localStorage.getItem('li_design') || 'lockin',
   cardio:{
     activity:null,
