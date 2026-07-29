@@ -1,4 +1,4 @@
-const CACHE = 'lockin-strength-v2.27.0';
+const CACHE = 'lockin-strength-v2.27.1';
 const ASSETS = ['./'];
 
 self.addEventListener('install', e => {
