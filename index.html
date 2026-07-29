@@ -227,6 +227,10 @@ select:focus,input:focus{outline:none;border-color:var(--accent)}
 const SUPABASE_URL = 'https://htatrfchehxgravtjpez.supabase.co';
 const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imh0YXRyZmNoZWh4Z3JhdnRqcGV6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA3MzM1MDEsImV4cCI6MjA5NjMwOTUwMX0.d5yg742obbESwqmiEBYUnkIUNqkz0WWfwVVbWqU6Kuo';
 const { createClient } = supabase;
+// Capture BEFORE createClient — detectSessionInUrl consumes the hash. An
+// invite-email link arrives as #...type=invite and signs the user in; we route
+// them to set a password first.
+let _emailInviteArrival=/type=invite/.test(location.hash);
 const sb = createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true, storageKey: 'lockin-auth' }
 });
@@ -275,6 +279,16 @@ async function refreshTrainerList(){
       ? list.map(t=>`<div style="display:flex;justify-content:space-between;gap:8px;padding:3px 0"><span style="word-break:break-all;color:var(--text)">${esc(t.email)}</span><span style="flex-shrink:0">${t.active_clients} client${t.active_clients!==1?'s':''}</span></div>`).join('')
       : 'No trainers yet.';
   }catch(e){ el2.textContent='Could not load trainers (run trainer-setup.sql).'; }
+}
+// Create a client account by email via the invite-client Edge Function: the
+// account is created + linked immediately and Supabase emails a set-password
+// link. Sends the caller's session token so the function can verify trainer role.
+async function inviteClientByEmail(email){
+  const {data:{session}}=await sb.auth.getSession();
+  const res=await fetch(`${SUPABASE_URL}/functions/v1/invite-client`,{method:'POST',headers:{'Content-Type':'application/json','apikey':SUPABASE_KEY,'Authorization':`Bearer ${session?.access_token||SUPABASE_KEY}`},body:JSON.stringify({email})});
+  let data={}; try{ data=await res.json(); }catch(e){}
+  if(!res.ok||data.error) throw new Error(data.error||'Could not send the invite.');
+  return data;
 }
 async function removeClientLink(clientId){
   if(!isTrainer()||!clientId) return;
@@ -388,7 +402,7 @@ async function deleteTicket(id){
   await loadSupportTickets(true); toast('Ticket deleted'); render();
 }
 
-const APP_VERSION = '2.27.1';
+const APP_VERSION = '2.28.0';
 const OWNER_UID     = '031a65ed-f52d-4a67-b271-47778e920c22';
 // Invite code from the URL (?invite=CODE) — drives the invite-only signup flow.
 let pendingInvite = new URLSearchParams(location.search).get('invite');
@@ -460,11 +474,17 @@ function showApp(){ document.getElementById('screen-loading').style.display='non
 async function initAuth(){
   showLoading();
   const { data:{ session } } = await sb.auth.getSession();
-  if(session){ currentUser=session.user; await loadUserData(); showApp(); }
+  if(session){ currentUser=session.user; await loadUserData(); if(_emailInviteArrival){ _emailInviteArrival=false; showAuth('reset'); } else showApp(); }
   else showAuth(pendingInvite ? 'invite' : 'login');
 
   sb.auth.onAuthStateChange(async(event,session)=>{
-    if(event==='SIGNED_IN'&&session){ currentUser=session.user; await loadUserData(); showApp(); }
+    if(event==='SIGNED_IN'&&session){
+      currentUser=session.user; await loadUserData();
+      // Arrived via a trainer's email invite: the account exists but has no
+      // password yet — take them to set one before entering the app.
+      if(_emailInviteArrival){ _emailInviteArrival=false; showAuth('reset'); return; }
+      showApp();
+    }
     else if(event==='SIGNED_OUT'){ currentUser=null; resetAppState(); showAuth('login'); }
     else if(event==='PASSWORD_RECOVERY') showAuth('reset');
   });
@@ -2491,7 +2511,12 @@ async function showAddClientModal(highlightCode){
     <div class="modal-overlay" id="modal-overlay">
       <div class="modal" style="max-height:88vh;overflow-y:auto">
         <div class="modal-title">Add Client</div>
-        <div style="font-size:13px;color:var(--text-muted);line-height:1.5;margin-bottom:4px">Generate an invite and send it to your client. When they sign up with it, they get their own account — linked to you.</div>
+        <div style="font-size:13px;color:var(--text-muted);line-height:1.5;margin-bottom:4px">Enter your client's email — their account is created instantly (linked to you, so you can start right away) and they get an email to set their password.</div>
+        <div class="field"><label>Client's email</label><input type="email" id="cinv-email" placeholder="client@example.com" autocomplete="off"></div>
+        <button class="btn btn-primary btn-full" id="cinv-email-btn">Create Account &amp; Email Invite</button>
+        <div id="cinv-email-msg"></div>
+        <hr class="divider" style="margin:6px 0">
+        <div style="font-size:13px;color:var(--text-muted);line-height:1.5;margin-bottom:4px"><b style="color:var(--text)">Or share an invite code</b> — they sign themselves up with it (also works if they prefer not to give you their email).</div>
         ${hi?`
           <div style="text-align:center;background:var(--surface2);border:1px solid var(--accent);border-radius:var(--radius-sm);padding:14px">
             <img src="${inviteQR(hi.code)}" alt="Invite QR code" width="200" height="200" style="border-radius:8px;background:#fff;padding:8px;width:200px;height:200px">
@@ -2521,6 +2546,20 @@ async function showAddClientModal(highlightCode){
     </div>`;
   document.getElementById('modal-cancel').addEventListener('click',()=>{ closeModal(); loadClients(true); });
   document.getElementById('modal-overlay').addEventListener('click',e=>{ if(e.target===e.currentTarget){ closeModal(); loadClients(true); } });
+  document.getElementById('cinv-email-btn').addEventListener('click',async()=>{
+    const email=document.getElementById('cinv-email').value.trim();
+    const msg=document.getElementById('cinv-email-msg');
+    if(!email){ msg.innerHTML='<div style="font-size:12px;color:var(--red);margin-top:6px">Enter an email address.</div>'; return; }
+    const btn=document.getElementById('cinv-email-btn'); btn.disabled=true; btn.textContent='Sending…';
+    try{
+      await inviteClientByEmail(email);
+      toast('Invite emailed ✓');
+      closeModal(); await loadClients(true); render();
+    }catch(err){
+      msg.innerHTML=`<div style="font-size:12px;color:var(--red);margin-top:6px;line-height:1.5">${esc(err.message)}</div>`;
+      btn.disabled=false; btn.textContent='Create Account & Email Invite';
+    }
+  });
   document.getElementById('cinv-generate').addEventListener('click',async()=>{
     const label=document.getElementById('cinv-label').value.trim();
     const btn=document.getElementById('cinv-generate'); btn.disabled=true; btn.textContent='Generating…';
