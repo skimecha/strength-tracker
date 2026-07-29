@@ -65,6 +65,13 @@ touches RLS gets adversarial testing before it reaches real users.
 - Client sees it as a guide panel ("This week from …") alongside free logging.
 - Plan history persists on the client's side after unlinking.
 
+### Shipped early (v2.28.0): trainer adds client by email
+Trainer enters a client's email in Add Client → account is created instantly
+(linked, trainer can start immediately) → Supabase Auth emails a set-password
+link (`invite-client` Edge Function, built-in mailer; configure custom SMTP for
+volume). Consent guard: refuses emails that already have an account — linking
+an existing account stays in Phase 4 (client consent required).
+
 ### Phase 4 — Client-initiated linking
 - Client enters a trainer's email → uniform "Request sent" response
   (no email enumeration — never confirm whether an account exists).
