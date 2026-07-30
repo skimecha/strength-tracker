@@ -91,7 +91,8 @@ Deno.serve(async (req) => {
     //     visibility is attached in Phase 1.
     if (inv.invite_type === "client" && inv.trainer_id) {
       await admin.from("trainer_clients").upsert(
-        { trainer_id: inv.trainer_id, client_id: uid, status: "active" },
+        // The code's label doubles as the trainer's display name for the client.
+        { trainer_id: inv.trainer_id, client_id: uid, status: "active", client_label: inv.label || null },
         { onConflict: "trainer_id,client_id" },
       );
     }

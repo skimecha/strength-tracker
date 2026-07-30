@@ -283,9 +283,9 @@ async function refreshTrainerList(){
 // Create a client account by email via the invite-client Edge Function: the
 // account is created + linked immediately and Supabase emails a set-password
 // link. Sends the caller's session token so the function can verify trainer role.
-async function inviteClientByEmail(email){
+async function inviteClientByEmail(email, label){
   const {data:{session}}=await sb.auth.getSession();
-  const res=await fetch(`${SUPABASE_URL}/functions/v1/invite-client`,{method:'POST',headers:{'Content-Type':'application/json','apikey':SUPABASE_KEY,'Authorization':`Bearer ${session?.access_token||SUPABASE_KEY}`},body:JSON.stringify({email})});
+  const res=await fetch(`${SUPABASE_URL}/functions/v1/invite-client`,{method:'POST',headers:{'Content-Type':'application/json','apikey':SUPABASE_KEY,'Authorization':`Bearer ${session?.access_token||SUPABASE_KEY}`},body:JSON.stringify({email,label:label||''})});
   let data={}; try{ data=await res.json(); }catch(e){}
   if(!res.ok||data.error) throw new Error(data.error||'Could not send the invite.');
   return data;
@@ -402,7 +402,7 @@ async function deleteTicket(id){
   await loadSupportTickets(true); toast('Ticket deleted'); render();
 }
 
-const APP_VERSION = '2.28.0';
+const APP_VERSION = '2.29.0';
 const OWNER_UID     = '031a65ed-f52d-4a67-b271-47778e920c22';
 // Invite code from the URL (?invite=CODE) — drives the invite-only signup flow.
 let pendingInvite = new URLSearchParams(location.search).get('invite');
@@ -949,7 +949,7 @@ function renderTrainerHome(){
     <div class="muscle-grid">
       <button class="muscle-btn" id="trainer-my-training" style="border-color:var(--accent)">💪 My Training</button>
       ${state.clients===null?'<div class="empty" style="grid-column:1/-1">Loading clients…</div>'
-        :active.map(c=>`<button class="muscle-btn" data-client="${esc(c.client_id)}" style="word-break:break-all">${esc(c.email||'(no email)')}</button>`).join('')}
+        :active.map(c=>`<button class="muscle-btn" data-client="${esc(c.client_id)}" style="word-break:break-word">${esc(c.label||c.email||'(no email)')}</button>`).join('')}
     </div>
     ${state.clients!==null&&!active.length?'<div class="empty">No clients yet — add your first below.</div>':''}
     <button class="btn btn-primary btn-full" id="add-client-btn">＋ Add Client</button>
@@ -961,12 +961,14 @@ function renderTrainerClient(){
   return `
     <div style="display:flex;align-items:center;gap:10px">
       <button class="btn btn-outline btn-sm" id="back-trainer-home">← Clients</button>
-      <div class="page-title" style="font-size:18px;word-break:break-all">${esc(c.email||'Client')}</div>
+      <div class="page-title" style="font-size:18px;word-break:break-word">${esc(c.label||c.email||'Client')}</div>
     </div>
     <div class="card">
       <div class="card-title">Client</div>
-      <div style="font-size:14px;color:var(--text);word-break:break-all;margin-bottom:4px">${esc(c.email||'')}</div>
-      <div style="font-size:12px;color:var(--text-muted)">Linked ${c.linked_at?fmtDate(new Date(c.linked_at).getTime()):''}</div>
+      ${c.label?`<div style="font-size:15px;font-weight:700;color:var(--text);margin-bottom:2px">${esc(c.label)}</div>`:''}
+      <div style="font-size:14px;color:${c.label?'var(--text-muted)':'var(--text)'};word-break:break-all;margin-bottom:4px">${esc(c.email||'')}</div>
+      <div style="font-size:12px;color:var(--text-muted);margin-bottom:10px">Linked ${c.linked_at?fmtDate(new Date(c.linked_at).getTime()):''}</div>
+      <button class="btn btn-outline btn-sm" id="rename-client-btn" style="width:auto;padding:6px 14px">${c.label?'Rename':'Set name'}</button>
     </div>
     <div class="card">
       <div class="card-title">Coaching View</div>
@@ -1774,6 +1776,13 @@ function attachEvents(){
   el('back-trainer-home',()=>{ state.logStep='trainer-home'; state.selectedClient=null; render(); });
   el('add-client-btn',()=>{ showAddClientModal(); });
   el('remove-client-btn',()=>{ removeClientLink(state.selectedClient); });
+  el('rename-client-btn',async()=>{
+    const c=(state.clients||[]).find(x=>x.client_id===state.selectedClient); if(!c) return;
+    const name=prompt('Client name', c.label||''); if(name===null) return;
+    const {error}=await sb.from('trainer_clients').update({client_label:name.trim()||null,updated_at:new Date().toISOString()}).eq('trainer_id',currentUser.id).eq('client_id',c.client_id);
+    if(error){ toast('Could not rename: '+error.message,'var(--red)'); return; }
+    await loadClients(true); toast('Saved'); render();
+  });
   document.querySelectorAll('[data-client]').forEach(b=>b.addEventListener('click',()=>{ state.selectedClient=b.dataset.client; state.logStep='trainer-client'; render(); }));
 
   el('back-workout',()=>{ state.logStep='workout'; state.searchQ=''; render(); });
@@ -2512,6 +2521,7 @@ async function showAddClientModal(highlightCode){
       <div class="modal" style="max-height:88vh;overflow-y:auto">
         <div class="modal-title">Add Client</div>
         <div style="font-size:13px;color:var(--text-muted);line-height:1.5;margin-bottom:4px">Enter your client's email — their account is created instantly (linked to you, so you can start right away) and they get an email to set their password.</div>
+        <div class="field"><label>Client's name</label><input type="text" id="cinv-name" placeholder="e.g. Trent" autocomplete="off"></div>
         <div class="field"><label>Client's email</label><input type="email" id="cinv-email" placeholder="client@example.com" autocomplete="off"></div>
         <button class="btn btn-primary btn-full" id="cinv-email-btn">Create Account &amp; Email Invite</button>
         <div id="cinv-email-msg"></div>
@@ -2552,7 +2562,7 @@ async function showAddClientModal(highlightCode){
     if(!email){ msg.innerHTML='<div style="font-size:12px;color:var(--red);margin-top:6px">Enter an email address.</div>'; return; }
     const btn=document.getElementById('cinv-email-btn'); btn.disabled=true; btn.textContent='Sending…';
     try{
-      await inviteClientByEmail(email);
+      await inviteClientByEmail(email, document.getElementById('cinv-name').value.trim());
       toast('Invite emailed ✓');
       closeModal(); await loadClients(true); render();
     }catch(err){

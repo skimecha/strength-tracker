@@ -42,6 +42,10 @@ create table if not exists public.trainer_clients (
   primary key (trainer_id, client_id)
 );
 
+-- Trainer-facing display name for the client ("Trent"), set at invite time
+-- from either flow (email field, or the invite code's label on redemption).
+alter table public.trainer_clients add column if not exists client_label text;
+
 alter table public.trainer_clients enable row level security;
 
 -- Trainer: may read their own links and update them (remove a client).
@@ -95,13 +99,14 @@ create policy invite_codes_trainer_insert on public.invite_codes
 
 -- ── trainer_list_clients(): client list with emails, without widening
 --    profiles RLS. Only returns the CALLER's links. ─────────────────────────
+drop function if exists public.trainer_list_clients();  -- return type changed (added label)
 create or replace function public.trainer_list_clients()
-returns table (client_id uuid, email text, status text, linked_at timestamptz)
+returns table (client_id uuid, email text, label text, status text, linked_at timestamptz)
 language sql
 security definer
 set search_path = public
 as $$
-  select tc.client_id, p.email, tc.status, tc.created_at
+  select tc.client_id, p.email, tc.client_label, tc.status, tc.created_at
   from public.trainer_clients tc
   left join public.profiles p on p.id = tc.client_id
   where tc.trainer_id = auth.uid()
