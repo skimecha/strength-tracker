@@ -36,7 +36,8 @@ Deno.serve(async (req) => {
   if (req.method !== "POST") return json({ error: "Method not allowed" }, 405);
 
   try {
-    const { email } = await req.json();
+    const { email, label } = await req.json();
+    const clientLabel = String(label || "").trim().slice(0, 60) || null;
     const target = String(email || "").trim().toLowerCase();
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(target)) {
       return json({ error: "Enter a valid email address." }, 400);
@@ -85,7 +86,7 @@ Deno.serve(async (req) => {
     await admin.from("profiles").upsert({ id: uid, email: target, role: "user" }, { onConflict: "id" });
     await admin.from("macro_goals").upsert({ user_id: uid, ...DEFAULT_GOALS }, { onConflict: "user_id" });
     await admin.from("trainer_clients").upsert(
-      { trainer_id: user.id, client_id: uid, status: "active" },
+      { trainer_id: user.id, client_id: uid, status: "active", client_label: clientLabel },
       { onConflict: "trainer_id,client_id" },
     );
 

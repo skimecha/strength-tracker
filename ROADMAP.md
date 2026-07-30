@@ -80,6 +80,15 @@ an existing account stays in Phase 4 (client consent required).
 - First transactional email (e.g. Resend via edge function). A shareable-link
   variant ("send this to your trainer") can ship first with zero email infra.
 
+### Ops — transactional email branding (before the gym pilot)
+- **Custom SMTP** in Supabase Auth settings (e.g. Resend free tier) so invite /
+  reset emails send from **@LockInStrength.com**, not @supabase — also lifts the
+  built-in mailer's few-per-hour rate limit and improves deliverability.
+  Requires DNS records (SPF/DKIM) on the domain.
+- **Styled email templates** (Auth → Email Templates): Lock In branding and
+  clearer messaging for Invite ("Your trainer set up your account…"),
+  Confirm, and Password Reset emails.
+
 ### Later / parked
 - **Meal planning** (builds on nutrition visibility).
 - **Organization accounts** (gym-level): all trainers in an org can access org
