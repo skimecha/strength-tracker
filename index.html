@@ -402,7 +402,7 @@ async function deleteTicket(id){
   await loadSupportTickets(true); toast('Ticket deleted'); render();
 }
 
-const APP_VERSION = '2.29.0';
+const APP_VERSION = '2.30.0';
 const OWNER_UID     = '031a65ed-f52d-4a67-b271-47778e920c22';
 // Invite code from the URL (?invite=CODE) — drives the invite-only signup flow.
 let pendingInvite = new URLSearchParams(location.search).get('invite');
@@ -1275,8 +1275,8 @@ function renderNutrition(){
     </div>
     ${view==='log'?`
       <button class="btn btn-primary" id="add-food-btn">+ Add Food / Meal</button>
-      ${todayEntries.length?`<div class="card"><div class="card-title">Today's Log</div><div class="section-gap">${[...todayEntries].reverse().map(e=>`<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:8px"><div style="flex:1;min-width:0"><div style="font-size:14px;font-weight:700;color:var(--text)">${esc(e.name)}</div><div style="font-size:12px;color:var(--text-muted);margin-top:2px">${fmtTime(e.ts)} · P:${e.protein}g C:${e.carbs}g F:${e.fat}g</div></div><div style="text-align:right;flex-shrink:0;display:flex;flex-direction:column;align-items:flex-end;gap:4px"><div style="font-size:16px;font-weight:800;color:var(--text)">${e.calories} kcal</div><div style="display:flex;gap:6px"><button class="btn btn-xs ${isMealFav(e)?'btn-amber':'btn-outline'}" data-fav-food="${e.id}" title="${isMealFav(e)?'Remove from favorites':'Save as favorite'}">★</button><button class="btn btn-xs btn-danger" data-del-food="${e.id}">✕</button></div></div></div>`).join('<hr class="divider" style="margin:2px 0">')}</div></div>`:''}
-      ${state.mealFavorites.length?`<div class="card"><div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;gap:8px"><div class="card-title" style="margin:0">Favorites</div><div class="toggle-group" style="width:auto;display:inline-flex;flex:0 0 auto"><div class="toggle-opt ${state.favSort==='recent'?'active':''}" onclick="state.favSort='recent';localStorage.setItem('li_fav_sort','recent');render()" style="padding:4px 12px;font-size:12px">Recent</div><div class="toggle-opt ${state.favSort==='alpha'?'active':''}" onclick="state.favSort='alpha';localStorage.setItem('li_fav_sort','alpha');render()" style="padding:4px 12px;font-size:12px">A–Z</div></div></div><div class="section-gap">${sortedFavorites().map(f=>`<div style="display:flex;align-items:center;gap:10px"><div style="flex:1;min-width:0;cursor:pointer" data-edit-fav="${f.id}" title="Edit favorite"><div style="font-size:14px;font-weight:700;color:var(--text)">${esc(f.name)}</div><div style="font-size:12px;color:var(--text-muted);margin-top:1px">${f.calories} kcal · P:${f.protein}g C:${f.carbs}g F:${f.fat}g</div></div><button class="btn btn-outline btn-xs" data-log-fav="${f.id}" style="flex-shrink:0">+ Log</button><button class="fav-del" data-del-fav="${f.id}" title="Remove favorite">★</button></div>`).join('<hr class="divider" style="margin:2px 0">')}</div></div>`:''}
+      ${todayEntries.length?`<div class="card"><div class="card-title">Today's Log</div><div class="section-gap">${[...todayEntries].reverse().map(e=>`<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:8px"><div style="flex:1;min-width:0"><div style="font-size:14px;font-weight:700;color:var(--text)">${esc(e.name)}</div><div style="font-size:12px;color:var(--text-muted);margin-top:2px">${fmtTime(e.ts)} · P:${e.protein}g C:${e.carbs}g F:${e.fat}g &nbsp;${pBadge(e.protein,e.calories)}</div></div><div style="text-align:right;flex-shrink:0;display:flex;flex-direction:column;align-items:flex-end;gap:4px"><div style="font-size:16px;font-weight:800;color:var(--text)">${e.calories} kcal</div><div style="display:flex;gap:6px"><button class="btn btn-xs ${isMealFav(e)?'btn-amber':'btn-outline'}" data-fav-food="${e.id}" title="${isMealFav(e)?'Remove from favorites':'Save as favorite'}">★</button><button class="btn btn-xs btn-danger" data-del-food="${e.id}">✕</button></div></div></div>`).join('<hr class="divider" style="margin:2px 0">')}</div></div>`:''}
+      ${state.mealFavorites.length?`<div class="card"><div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;gap:8px"><div class="card-title" style="margin:0">Favorites</div><div class="toggle-group" style="width:auto;display:inline-flex;flex:0 0 auto"><div class="toggle-opt ${state.favSort==='recent'?'active':''}" onclick="state.favSort='recent';localStorage.setItem('li_fav_sort','recent');render()" style="padding:4px 12px;font-size:12px">Recent</div><div class="toggle-opt ${state.favSort==='alpha'?'active':''}" onclick="state.favSort='alpha';localStorage.setItem('li_fav_sort','alpha');render()" style="padding:4px 12px;font-size:12px">A–Z</div></div></div><div class="section-gap">${sortedFavorites().map(f=>`<div style="display:flex;align-items:center;gap:10px"><div style="flex:1;min-width:0;cursor:pointer" data-edit-fav="${f.id}" title="Edit favorite"><div style="font-size:14px;font-weight:700;color:var(--text)">${esc(f.name)}</div><div style="font-size:12px;color:var(--text-muted);margin-top:1px">${f.calories} kcal · P:${f.protein}g C:${f.carbs}g F:${f.fat}g &nbsp;${pBadge(f.protein,f.calories)}</div></div><button class="btn btn-outline btn-xs" data-log-fav="${f.id}" style="flex-shrink:0">+ Log</button><button class="fav-del" data-del-fav="${f.id}" title="Remove favorite">★</button></div>`).join('<hr class="divider" style="margin:2px 0">')}</div></div>`:''}
       <div style="font-size:11px;color:var(--text-muted);text-align:center">Export all data from the History tab</div>
     `:`
       <div style="display:flex;gap:6px;overflow-x:auto;padding-bottom:2px;flex-shrink:0">
@@ -1290,6 +1290,19 @@ function renderNutrition(){
     `}`;
 }
 function macroBar(label,color,val,goal,unit){ const pct=goal>0?Math.min(100,Math.round(val/goal*100)):0; return `<div class="macro-row"><span class="macro-label">${label}</span><span class="macro-val">${val}/${goal}${unit}</span></div><div class="macro-bar-wrap"><div class="macro-bar" style="width:${pct}%;background:${color}"></div></div>`; }
+// Protein density: % of calories from protein (protein = 4 kcal/g). This is
+// the standard nutrition framing (AMDR is 10–35% of calories from protein).
+// Capped at 100 — label rounding can push very lean foods slightly over.
+function proteinPct(protein, calories){ const c=+calories, p=+protein; if(!(c>0)||!(p>0)) return null; return Math.min(100, Math.round(p*4/c*100)); }
+// Bands anchored to real foods: gold = elite sources (chicken breast ~75%),
+// green = solid (eggs ~34%), orange = moderate (milk ~21%), red = low density.
+// Red means "not a protein source", not "bad food".
+function proteinColor(pct){ return pct>=50?'#d4af37':pct>=30?'var(--green)':pct>=15?'#f97316':'var(--red)'; }
+function pBadge(protein, calories){
+  const pct=proteinPct(protein,calories); if(pct===null) return '';
+  const col=proteinColor(pct);
+  return `<span style="font-size:10.5px;font-weight:800;color:${col};border:1px solid ${col};border-radius:9px;padding:0 6px;white-space:nowrap;vertical-align:1px" title="${pct}% of calories come from protein">P ${pct}%</span>`;
+}
 function sortedFavorites(){
   const nm=(s)=>String(s||'').toLowerCase();
   return [...state.mealFavorites].sort((a,b)=> state.favSort==='alpha'
@@ -2038,6 +2051,7 @@ function showAddFoodModal(){
     <div id="ai-status" style="margin:6px 0 0"></div>
     <div class="field" style="margin-top:10px"><label>Calories (kcal)</label><input type="number" id="f-cal" placeholder="0"></div>
     <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px"><div class="field"><label>Protein (g)</label><input type="number" id="f-pro" placeholder="0"></div><div class="field"><label>Carbs (g)</label><input type="number" id="f-carb" placeholder="0"></div><div class="field"><label>Fat (g)</label><input type="number" id="f-fat" placeholder="0"></div></div>
+    <div id="p-ratio-line" style="min-height:18px;margin-top:2px"></div>
     <div class="btn-grid"><button class="btn btn-outline" id="modal-cancel">Cancel</button><button class="btn btn-primary" id="modal-save-food">Add</button></div>
   </div></div>`;
   const $=id=>document.getElementById(id);
@@ -2046,6 +2060,14 @@ function showAddFoodModal(){
   $('f-name').focus();
 
   const note=(html)=>{ $('ai-status').innerHTML=html; };
+  // Live protein-density readout — updates as calories/protein change, however
+  // they got there (typed, AI Macros, or a label scan).
+  const updatePRatio=()=>{
+    const b=pBadge(parseFloat($('f-pro').value)||0, parseFloat($('f-cal').value)||0);
+    $('p-ratio-line').innerHTML=b?`<div style="font-size:12px;color:var(--text-muted)">${b}&nbsp; of calories from protein</div>`:'';
+  };
+  $('f-cal').addEventListener('input',updatePRatio);
+  $('f-pro').addEventListener('input',updatePRatio);
   async function runAI(){
     const name=$('f-name').value.trim(); if(!name){ toast('Enter a food name first','var(--red)'); return; }
     const qty=parseFloat($('f-qty').value)||1; const unit=$('f-unit').value;
@@ -2059,6 +2081,7 @@ function showAddFoodModal(){
       } else if(r.type==='macros'){
         aiUsed=true;
         $('f-cal').value=r.calories; $('f-pro').value=r.protein; $('f-carb').value=r.carbs; $('f-fat').value=r.fat;
+        updatePRatio();
         const detail=[r.basis,r.assumptions].filter(Boolean).map(esc).join(' · ');
         const label=r.source==='cache'?'From saved data':'AI estimate';
         note(`<div style="font-size:12px;color:var(--amber)">✨ ${label} — verify before relying on it.${detail?`<div style="color:var(--text-muted);margin-top:2px">${detail}</div>`:''}</div>`);
@@ -2079,6 +2102,7 @@ function showAddFoodModal(){
       if(r&&r.type==='macros'){
         if(r.name && !$('f-name').value.trim()) $('f-name').value=r.name;
         $('f-cal').value=r.calories; $('f-pro').value=r.protein; $('f-carb').value=r.carbs; $('f-fat').value=r.fat;
+        updatePRatio();
         aiUsed=true;  // accurate label values are good cache seed on save
         note(`<div style="font-size:12px;color:var(--amber)">📷 From nutrition label${r.serving?` — per ${esc(r.serving)}`:''} — double-check before saving.</div>`);
       } else {
