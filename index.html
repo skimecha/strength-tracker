@@ -402,7 +402,7 @@ async function deleteTicket(id){
   await loadSupportTickets(true); toast('Ticket deleted'); render();
 }
 
-const APP_VERSION = '2.30.0';
+const APP_VERSION = '2.30.1';
 const OWNER_UID     = '031a65ed-f52d-4a67-b271-47778e920c22';
 // Invite code from the URL (?invite=CODE) — drives the invite-only signup flow.
 let pendingInvite = new URLSearchParams(location.search).get('invite');
@@ -1268,7 +1268,7 @@ function renderNutrition(){
   const period=state.nutritionPeriod;
   return `
     <div class="page-header"><div><div class="page-title">Nutrition</div><div class="subtitle">${fmtDate(Date.now())}</div></div><div style="display:flex;align-items:center;gap:8px">${versionStamp()}<button class="btn btn-outline btn-sm" id="edit-goals-btn">Goals</button></div></div>
-    <div class="card"><div class="card-title">Today's Totals</div><div style="text-align:center;margin-bottom:14px;cursor:pointer" onclick="state.calorieDisplay=state.calorieDisplay==='remaining'?'total':'remaining';render()">${(()=>{const rem=g.calories-totals.calories;if(state.calorieDisplay==='remaining'){return rem>=0?`<div style="font-size:42px;font-weight:800;color:var(--text)">${rem}</div><div style="font-size:13px;color:var(--text-muted)">remaining of ${g.calories} kcal goal</div>`:`<div style="font-size:42px;font-weight:800;color:var(--amber)">${Math.abs(rem)}</div><div style="font-size:13px;color:var(--amber)">over your ${g.calories} kcal goal</div>`;}return `<div style="font-size:42px;font-weight:800;color:var(--text)">${totals.calories}</div><div style="font-size:13px;color:var(--text-muted)">of ${g.calories} kcal goal</div>`;})()}<div style="font-size:10px;color:var(--text-muted);margin-top:4px;opacity:.7">tap to ${state.calorieDisplay==='remaining'?'show total':'show remaining'}</div></div>${macroBar('Protein','var(--accent)',totals.protein,g.protein,'g')}<div style="margin-top:10px">${macroBar('Carbs','var(--green)',totals.carbs,g.carbs,'g')}</div><div style="margin-top:10px">${macroBar('Fat','var(--amber)',totals.fat,g.fat,'g')}</div></div>
+    <div class="card"><div class="card-title">Today's Totals</div><div style="text-align:center;margin-bottom:14px;cursor:pointer" onclick="state.calorieDisplay=state.calorieDisplay==='remaining'?'total':'remaining';render()">${(()=>{const rem=g.calories-totals.calories;if(state.calorieDisplay==='remaining'){return rem>=0?`<div style="font-size:42px;font-weight:800;color:var(--text)">${rem}</div><div style="font-size:13px;color:var(--text-muted)">remaining of ${g.calories} kcal goal</div>`:`<div style="font-size:42px;font-weight:800;color:var(--amber)">${Math.abs(rem)}</div><div style="font-size:13px;color:var(--amber)">over your ${g.calories} kcal goal</div>`;}return `<div style="font-size:42px;font-weight:800;color:var(--text)">${totals.calories}</div><div style="font-size:13px;color:var(--text-muted)">of ${g.calories} kcal goal</div>`;})()}<div style="font-size:10px;color:var(--text-muted);margin-top:4px;opacity:.7">tap to ${state.calorieDisplay==='remaining'?'show total':'show remaining'}</div></div>${macroBar('Protein','var(--accent)',totals.protein,g.protein,'g',pBadge(totals.protein,totals.calories))}<div style="margin-top:10px">${macroBar('Carbs','var(--green)',totals.carbs,g.carbs,'g')}</div><div style="margin-top:10px">${macroBar('Fat','var(--amber)',totals.fat,g.fat,'g')}</div></div>
     <div class="toggle-group">
       <div class="toggle-opt ${view==='log'?'active':''}" onclick="state.nutritionView='log';render()">Log</div>
       <div class="toggle-opt ${view==='chart'?'active':''}" onclick="state.nutritionView='chart';render()">Chart</div>
@@ -1289,7 +1289,7 @@ function renderNutrition(){
       </div>
     `}`;
 }
-function macroBar(label,color,val,goal,unit){ const pct=goal>0?Math.min(100,Math.round(val/goal*100)):0; return `<div class="macro-row"><span class="macro-label">${label}</span><span class="macro-val">${val}/${goal}${unit}</span></div><div class="macro-bar-wrap"><div class="macro-bar" style="width:${pct}%;background:${color}"></div></div>`; }
+function macroBar(label,color,val,goal,unit,extra){ const pct=goal>0?Math.min(100,Math.round(val/goal*100)):0; return `<div class="macro-row"><span class="macro-label">${label}${extra?' &nbsp;'+extra:''}</span><span class="macro-val">${val}/${goal}${unit}</span></div><div class="macro-bar-wrap"><div class="macro-bar" style="width:${pct}%;background:${color}"></div></div>`; }
 // Protein density: % of calories from protein (protein = 4 kcal/g). This is
 // the standard nutrition framing (AMDR is 10–35% of calories from protein).
 // Capped at 100 — label rounding can push very lean foods slightly over.
