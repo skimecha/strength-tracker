@@ -402,7 +402,7 @@ async function deleteTicket(id){
   await loadSupportTickets(true); toast('Ticket deleted'); render();
 }
 
-const APP_VERSION = '2.31.0';
+const APP_VERSION = '2.31.1';
 const OWNER_UID     = '031a65ed-f52d-4a67-b271-47778e920c22';
 // Invite code from the URL (?invite=CODE) — drives the invite-only signup flow.
 let pendingInvite = new URLSearchParams(location.search).get('invite');
@@ -990,7 +990,7 @@ function renderWorkoutScreen(){
   return `
     <div style="display:flex;align-items:baseline;justify-content:space-between"><div style="display:flex;align-items:center;gap:10px">${isTrainer()?'<button class="btn btn-outline btn-sm" id="back-trainer-home">← Clients</button>':''}<div class="page-title">Log Workout</div></div>${versionStamp()}</div>
     <div class="subtitle">${fmtDate(Date.now())}</div>
-    ${state.splitPicking?`<div style="background:var(--accent-dim);border:1px solid var(--accent);border-radius:var(--radius-sm);padding:10px 14px;font-size:13px;color:var(--accent);font-weight:700;display:flex;align-items:center;justify-content:space-between;gap:10px"><span>⑂ Split set — choose the next exercise.</span><button class="btn btn-outline btn-xs" id="split-cancel-pick" style="flex-shrink:0">Cancel</button></div>`
+    ${state.splitPicking?`<div style="background:var(--accent-dim);border:1px solid var(--accent);border-radius:var(--radius-sm);padding:10px 14px;font-size:13px;color:var(--accent);font-weight:700;display:flex;align-items:center;justify-content:space-between;gap:10px"><span>⑂ Super set — choose the next exercise.</span><button class="btn btn-outline btn-xs" id="split-cancel-pick" style="flex-shrink:0">Cancel</button></div>`
       :hasSets?`<div style="background:var(--accent-dim);border:1px solid var(--accent);border-radius:var(--radius-sm);padding:10px 14px;font-size:13px;color:var(--accent);font-weight:700">↩ Resuming ${fmtDate(state._currentSession.date)} — ${state._currentSession.exercises.length} exercise${state._currentSession.exercises.length!==1?'s':''} logged. Add more or finish.</div>`:''}
     <div>
       <div class="card-title" style="margin-bottom:10px">Strength Training</div>
@@ -1048,8 +1048,8 @@ function renderSets(){
   const workingSets=state.pendingSets.filter(s=>s.type==='working');
   const setNum=state.setType==='warmup'?warmupSets.length+1:workingSets.length+1;
   return `
-    <div style="display:flex;align-items:center;gap:10px"><button class="btn btn-outline btn-sm" id="back-exercise">← Back</button><div style="min-width:0"><div class="page-title" style="font-size:17px">${state.selectedExercise}</div><div class="subtitle">${state.selectedMuscle}</div></div><button class="btn btn-outline btn-sm" id="split-set-btn" style="margin-left:auto;flex-shrink:0" title="Superset: log another exercise alongside this one">⑂ Split Set</button></div>
-    ${state.split&&state.split.length?`<div style="display:flex;gap:6px;overflow-x:auto;padding-bottom:2px">${state.split.map((en,i)=>{ const n=i===state.splitIdx?state.pendingSets.length:(en.sets||[]).length; return `<button class="period-btn ${i===state.splitIdx?'active':''}" data-splitchip="${i}">${esc(en.name)}${n?` · ${n}`:''}</button>`; }).join('')}</div>`:''}
+    <div style="display:flex;align-items:center;gap:10px"><button class="btn btn-outline btn-sm" id="back-exercise">← Back</button><div style="min-width:0"><div class="page-title" style="font-size:17px">${state.selectedExercise}</div><div class="subtitle">${state.selectedMuscle}</div></div><button class="btn btn-outline btn-sm" id="split-set-btn" style="margin-left:auto;flex-shrink:0" title="Log another exercise alongside this one">⑂ Super Set</button></div>
+    ${state.split&&state.split.length?`<div style="display:flex;gap:6px;overflow-x:auto;flex-shrink:0;padding-bottom:2px">${state.split.map((en,i)=>{ const n=i===state.splitIdx?state.pendingSets.length:(en.sets||[]).length; return `<button class="period-btn ${i===state.splitIdx?'active':''}" data-splitchip="${i}">${esc(en.name)}${n?` · ${n}`:''}</button>`; }).join('')}</div>`:''}
     <div class="card"><div class="card-title">Set Type</div><div class="toggle-group"><div class="toggle-opt ${state.setType==='warmup'?'active':''}" data-toggle="warmup">Warmup</div><div class="toggle-opt ${state.setType==='working'?'active':''}" data-toggle="working">Working</div></div></div>
     <div class="card">
       <div class="card-title">${state.setType==='warmup'?'Warmup':'Working'} Set ${setNum}</div>
@@ -1070,7 +1070,7 @@ function renderSets(){
     <button class="btn btn-primary btn-full" id="log-set">+ Log Set</button>
     ${renderTimer()}
     <hr class="divider">
-    <div class="btn-grid"><button class="btn btn-outline" id="next-exercise">${state.split?'✓ Log Split Set':'Next Exercise'}</button><button class="btn btn-outline" id="new-muscle">New Muscle</button></div>
+    <div class="btn-grid"><button class="btn btn-outline" id="next-exercise">${state.split?'✓ Log Super Set':'Next Exercise'}</button><button class="btn btn-outline" id="new-muscle">New Muscle</button></div>
     <button class="btn btn-green" id="finish-workout">✓ Finish & Save</button>
     <button class="btn btn-danger btn-sm btn-full" id="cancel-workout">Cancel Workout</button>
     ${renderExerciseHistory(state.selectedExercise)}`;
@@ -1796,7 +1796,7 @@ function attachEvents(){
   document.querySelectorAll('[data-muscle]').forEach(b=>b.addEventListener('click',()=>{ state.selectedMuscle=b.dataset.muscle; state.searchQ=''; state.logStep='exercise'; render(); }));
   document.querySelectorAll('[data-exercise]').forEach(b=>b.addEventListener('click',e=>{ if(e.target.closest('[data-fav]')) return; const name=b.dataset.exercise; if(state.split){ splitAddOrSwitch(name); } else { state.selectedExercise=name; state.pendingSets=[]; } state.logStep='sets'; render(); }));
 
-  // Split sets
+  // Super sets
   el('split-set-btn', startSplitPick);
   el('split-cancel-pick',()=>{ state.splitPicking=false; if(state.split&&state.split.length===1){ state.split=null; state.splitIdx=0; } state.logStep='sets'; render(); });
   document.querySelectorAll('[data-splitchip]').forEach(b=>b.addEventListener('click',()=>{
@@ -1980,7 +1980,7 @@ function attachEvents(){
   }));
 }
 
-// ── Split sets (supersets) ───────────────────────────────────────────────────
+// ── Super sets ───────────────────────────────────────────────────
 // state.split = [{muscle, name, sets:[]}] while a split is being logged; the
 // ACTIVE exercise's sets live in state.pendingSets (source of truth) and are
 // parked into its split entry whenever you hop exercises. On commit, each
