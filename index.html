@@ -402,7 +402,7 @@ async function deleteTicket(id){
   await loadSupportTickets(true); toast('Ticket deleted'); render();
 }
 
-const APP_VERSION = '2.31.1';
+const APP_VERSION = '2.31.2';
 const OWNER_UID     = '031a65ed-f52d-4a67-b271-47778e920c22';
 // Invite code from the URL (?invite=CODE) — drives the invite-only signup flow.
 let pendingInvite = new URLSearchParams(location.search).get('invite');
@@ -437,6 +437,41 @@ const EXERCISES = {
 };
 
 const CARDIO_ACTIVITIES = ['Running','Walking','Cycling','Rowing','Elliptical','Swimming','Jump Rope','Stair Climber','Hiking','HIIT','Skiing','Other'];
+
+// Shorthand titles for compact contexts (super-set chips). Only exercises whose
+// full name exceeds 20 characters get one; everything else displays as-is.
+const SHORT_NAMES = {
+  'Bench Press - Barbell':'Barbell Bench','Bench Press - Dumbell':'Dumbell Bench',
+  'Floor Press - Barbell':'Floor Press','Incline Bench Press - Barbell':'Incline Bench (BB)',
+  'Incline Bench Press - Dumbell':'Incline Bench (DB)','Incline Fly - Dumbell':'Incline Fly',
+  'Dumbell Row - One Arm':'One-Arm Row','Good Morning - Barbell':'Good Morning',
+  'Reverse Fly - Dumbell':'Reverse Fly (DB)','Reverse Fly - Machine':'Machine Reverse Fly',
+  'Cable Pulldown - Wide Grip':'Wide-Grip Pulldown','Diverging Lat Pulldown':'Diverging Pulldown',
+  'Lat Pulldown - Close Grip':'Close-Grip Pulldown','Lat Pulldown - Underhand':'Underhand Pulldown',
+  'Machine Assisted Pull-ups':'Assisted Pull-ups','Straight Arm Pulldown - Cable':'Straight-Arm Pulldown',
+  'Dumbell Raise - Standing Front':'Shoulder Front Raise','Military Press - Barbell':'Military Press',
+  'Overhead Press - Dumbbell (Seated)':'Seated Dumbell Press','Overhead Press - Machine':'Machine Shoulder Press',
+  'Cable Lateral Raise - Hip Height':'Cable Lateral (Hip)','Cable Raise - Floor Height':'Cable Lateral (Floor)',
+  'Dumbell Raise - Standing Lateral':'Shoulder Lateral Raise','Machine Lateral Raise':'Machine Laterals',
+  'Seated Lateral Raise - Dumbell':'Seated Lateral Raise','Upright Row - Barbell':'Upright Row (BB)',
+  'Upright Row - Dumbell':'Upright Row (DB)','Dumbell Raise - Seated (Decline)':'Rear Delt Raise',
+  'Rear Delt Machine Fly':'Rear Delt Fly','Rotator Cuff - Flat Bench':'Rotator Cuff (Bench)',
+  'Curls - Concentration':'Concentration Curls','Curls - Dumbell (Decline)':'Decline Curls',
+  'Curls - Dumbell (Incline)':'Incline Curls','Curls - Dumbell (Standing)':'Dumbell Curls',
+  'Curls - EZ Bar (Standing)':'EZ Bar Curls','Curls - Preacher (EZ Bar)':'Preacher Curls (EZ)',
+  'Curls - Preacher (Flat Bar)':'Preacher Curls (Bar)','Curls - Preacher (Machine)':'Machine Preacher',
+  'Hammer Curls (Preacher)':'Preacher Hammers','Hammer Curls (Standing)':'Hammer Curls',
+  'Reverse Curls - Barbell':'Reverse Curls',
+  'Close-Grip Bench Press':'Close-Grip Bench','Extension - Cable (One-Arm)':'One-Arm Extension',
+  'Overhead Extension - Barbell':'Overhead Ext. (BB)','Overhead Extension - Cable (Two-Hand Bar)':'Cable Overhead Ext.',
+  'Overhead Extension - Dumbell':'Overhead Ext. (DB)','Skull Crushers - Barbell':'Skull Crushers (BB)',
+  'Skull Crushers - Dumbell':'Skull Crushers (DB)','Tricep Pushdown - Cable (Rope)':'Rope Pushdown',
+  'Tricep Pushdown - Cable (Two-Hand Bar)':'Bar Pushdown',
+  'Reverse Curl - Dumbell':'Reverse Curl',
+  'Bulgarian Split Squats':'Bulgarian Squats','Front Squat - Barbell':'Front Squat',
+  'Calf Raises - Leg Press':'Leg Press Calves','Calf Raises - Standing Machine':'Standing Calf Raise',
+};
+function shortName(n){ return SHORT_NAMES[n]||n; }
 
 // ─── APP STATE ────────────────────────────────────────────────────────────────
 let currentUser = null;
@@ -1049,7 +1084,7 @@ function renderSets(){
   const setNum=state.setType==='warmup'?warmupSets.length+1:workingSets.length+1;
   return `
     <div style="display:flex;align-items:center;gap:10px"><button class="btn btn-outline btn-sm" id="back-exercise">← Back</button><div style="min-width:0"><div class="page-title" style="font-size:17px">${state.selectedExercise}</div><div class="subtitle">${state.selectedMuscle}</div></div><button class="btn btn-outline btn-sm" id="split-set-btn" style="margin-left:auto;flex-shrink:0" title="Log another exercise alongside this one">⑂ Super Set</button></div>
-    ${state.split&&state.split.length?`<div style="display:flex;gap:6px;overflow-x:auto;flex-shrink:0;padding-bottom:2px">${state.split.map((en,i)=>{ const n=i===state.splitIdx?state.pendingSets.length:(en.sets||[]).length; return `<button class="period-btn ${i===state.splitIdx?'active':''}" data-splitchip="${i}">${esc(en.name)}${n?` · ${n}`:''}</button>`; }).join('')}</div>`:''}
+    ${state.split&&state.split.length?`<div style="display:flex;flex-wrap:wrap;gap:6px;flex-shrink:0">${state.split.map((en,i)=>{ const n=i===state.splitIdx?state.pendingSets.length:(en.sets||[]).length; return `<button class="period-btn ${i===state.splitIdx?'active':''}" data-splitchip="${i}">${esc(shortName(en.name))}${n?` · ${n}`:''}</button>`; }).join('')}</div>`:''}
     <div class="card"><div class="card-title">Set Type</div><div class="toggle-group"><div class="toggle-opt ${state.setType==='warmup'?'active':''}" data-toggle="warmup">Warmup</div><div class="toggle-opt ${state.setType==='working'?'active':''}" data-toggle="working">Working</div></div></div>
     <div class="card">
       <div class="card-title">${state.setType==='warmup'?'Warmup':'Working'} Set ${setNum}</div>
