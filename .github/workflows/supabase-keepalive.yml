@@ -1,14 +1,20 @@
 name: Supabase keep-alive
 
 # Prevents Supabase from pausing the free-tier project for inactivity:
-# a scheduled REST request is real API activity, which is what their
-# pause criterion measures. The key below is the anon key, public by
-# design (the same one shipped in index.html).
+# a scheduled API request is real activity, which is what their pause
+# criterion measures. The key below is the anon key, public by design
+# (the same one shipped in index.html).
 #
-# Unlike the portfolio's workflow this pings the REST root (OpenAPI spec)
-# rather than a table: every table here is granted to `authenticated`
-# only, so an anonymous table read would 4xx. The root returns 200 for
-# any valid apikey and still counts as activity.
+# Modeled on the portfolio's supabase-keepalive.yml, with two deviations
+# found by probing (2026-10-15):
+# - /rest/v1/ root now requires service_role, and every table here is
+#   granted to `authenticated` only — so the asserted ping is
+#   /auth/v1/health, which returns 200 for a valid anon key and dies
+#   when the project is paused.
+# - A REST table request is also sent for good measure: it is denied
+#   (42501 straight from Postgres), which proves a real database
+#   round-trip for the activity heuristic. Logged, not asserted, since
+#   its exact status code isn't contractual.
 #
 # Two side benefits:
 # - A failed run emails Matt, so this doubles as a paused-project alarm.
@@ -26,11 +32,19 @@ jobs:
   ping:
     runs-on: ubuntu-latest
     steps:
-      - name: Ping Supabase REST API
+      - name: Ping Supabase
         run: |
+          KEY="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imh0YXRyZmNoZWh4Z3JhdnRqcGV6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA3MzM1MDEsImV4cCI6MjA5NjMwOTUwMX0.d5yg742obbESwqmiEBYUnkIUNqkz0WWfwVVbWqU6Kuo"
+          BASE="https://htatrfchehxgravtjpez.supabase.co"
+
+          # Database-touching request (reaches Postgres; expected 401/42501).
+          rest=$(curl -s -o /dev/null -w "%{http_code}" --max-time 30 \
+            "$BASE/rest/v1/dev_notes?select=id&limit=1" \
+            -H "apikey: $KEY" -H "Authorization: Bearer $KEY")
+          echo "REST table touch responded HTTP $rest (informational)"
+
+          # Asserted health check: 200 with a valid key; fails when paused.
           code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 30 \
-            "https://htatrfchehxgravtjpez.supabase.co/rest/v1/" \
-            -H "apikey: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imh0YXRyZmNoZWh4Z3JhdnRqcGV6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA3MzM1MDEsImV4cCI6MjA5NjMwOTUwMX0.d5yg742obbESwqmiEBYUnkIUNqkz0WWfwVVbWqU6Kuo" \
-            -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imh0YXRyZmNoZWh4Z3JhdnRqcGV6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA3MzM1MDEsImV4cCI6MjA5NjMwOTUwMX0.d5yg742obbESwqmiEBYUnkIUNqkz0WWfwVVbWqU6Kuo")
-          echo "Supabase REST responded HTTP $code"
+            "$BASE/auth/v1/health" -H "apikey: $KEY")
+          echo "Auth health responded HTTP $code"
           test "$code" = "200"
