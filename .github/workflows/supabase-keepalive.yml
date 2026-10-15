@@ -1,0 +1,36 @@
+name: Supabase keep-alive
+
+# Prevents Supabase from pausing the free-tier project for inactivity:
+# a scheduled REST request is real API activity, which is what their
+# pause criterion measures. The key below is the anon key, public by
+# design (the same one shipped in index.html).
+#
+# Unlike the portfolio's workflow this pings the REST root (OpenAPI spec)
+# rather than a table: every table here is granted to `authenticated`
+# only, so an anonymous table read would 4xx. The root returns 200 for
+# any valid apikey and still counts as activity.
+#
+# Two side benefits:
+# - A failed run emails Matt, so this doubles as a paused-project alarm.
+# - workflow_dispatch allows a manual ping after restoring a pause.
+#
+# Caveat: GitHub disables scheduled workflows after 60 days with no repo
+# activity (it emails first; any push or a one-click re-enable re-arms).
+
+on:
+  schedule:
+    - cron: '23 9 * * 1,4' # Mon + Thu, 09:23 UTC
+  workflow_dispatch:
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping Supabase REST API
+        run: |
+          code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 30 \
+            "https://htatrfchehxgravtjpez.supabase.co/rest/v1/" \
+            -H "apikey: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imh0YXRyZmNoZWh4Z3JhdnRqcGV6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA3MzM1MDEsImV4cCI6MjA5NjMwOTUwMX0.d5yg742obbESwqmiEBYUnkIUNqkz0WWfwVVbWqU6Kuo" \
+            -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imh0YXRyZmNoZWh4Z3JhdnRqcGV6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA3MzM1MDEsImV4cCI6MjA5NjMwOTUwMX0.d5yg742obbESwqmiEBYUnkIUNqkz0WWfwVVbWqU6Kuo")
+          echo "Supabase REST responded HTTP $code"
+          test "$code" = "200"
