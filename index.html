@@ -405,7 +405,7 @@ async function deleteTicket(id){
   await loadSupportTickets(true); toast('Ticket deleted'); render();
 }
 
-const APP_VERSION = '2.32.2';
+const APP_VERSION = '2.33.0';
 const OWNER_UID     = '031a65ed-f52d-4a67-b271-47778e920c22';
 // Invite code from the URL (?invite=CODE) — drives the invite-only signup flow.
 let pendingInvite = new URLSearchParams(location.search).get('invite');
@@ -493,6 +493,7 @@ let state = {
   favFilter:false,searchQ:'',
   macroGoals:{calories:2500,protein:180,carbs:250,fat:80},
   foodLog:[],mealFavorites:[],
+  mealPrep:{meals:[],overrides:{}},mpStep:'week',mpWeekOff:0,mpDraft:null,
   weightLog:[],
   weightUnit: localStorage.getItem('li_weight_unit') || 'lbs',
   theme: localStorage.getItem('li_theme') || 'light',
@@ -532,6 +533,7 @@ async function initAuth(){
 function resetAppState(){
   state.sessions=[]; state.prs={}; state.favorites=[]; state.exerciseSettings={}; state.planTargets={hypertrophy:{},strength:{}};
   state.foodLog=[]; state.mealFavorites=[]; state.weightLog=[];
+  state.mealPrep={meals:[],overrides:{}}; state.mpDraft=null; state.mpStep='week'; state.mpWeekOff=0;
   state.macroGoals={calories:2500,protein:180,carbs:250,fat:80};
   state.logStep='type'; state._currentSession=null; state._resumedSnapshot=null; state.pendingSets=[]; state.view='log';
   state.split=null; state.splitIdx=0; state.splitPicking=false;
@@ -577,6 +579,8 @@ async function loadUserData(){
     await loadDevNotes();  // separate so a missing dev_notes table never aborts the main load
     // Per-exercise settings (assisted flag). Isolated so a missing table never aborts the load.
     try{ const es=await sb.from('exercise_settings').select('exercise,assisted').eq('user_id',userId); if(!es.error&&Array.isArray(es.data)){ const m={}; es.data.forEach(r=>{ m[r.exercise]={assisted:!!r.assisted}; }); state.exerciseSettings=m; } }catch(e){ state.exerciseSettings={}; }
+    // Meal Prep plan. Isolated so a missing meal_prep table never aborts the load.
+    try{ const mp=await sb.from('meal_prep').select('data').eq('user_id',userId).maybeSingle(); const d=(mp.data&&mp.data.data)||{}; state.mealPrep={meals:Array.isArray(d.meals)?d.meals:[],overrides:(d.overrides&&typeof d.overrides==='object')?d.overrides:{}}; }catch(e){ state.mealPrep={meals:[],overrides:{}}; }
     // Role (trainer plumbing). Isolated: a missing role column just means 'user'.
     try{ const pr=await sb.from('profiles').select('role').eq('id',userId).maybeSingle(); state.role=(pr.data&&pr.data.role)||'user'; }catch(e){ state.role='user'; }
     if(isTrainer()&&(state.logStep==='workout'||state.logStep==='type')&&!state._currentSession) state.logStep='trainer-home';
@@ -730,6 +734,14 @@ async function dbAddFood(entry){
   return data;
 }
 async function dbDeleteFood(id){ await sb.from('food_log').delete().eq('id',id).eq('user_id',currentUser.id); }
+async function dbSaveMealPrep(){
+  if(!currentUser) return;
+  // Prune per-date overrides older than 3 weeks so the row never grows unboundedly.
+  const cutoff=Date.now()-21*86400000;
+  Object.keys(state.mealPrep.overrides).forEach(k=>{ const t=new Date(k).getTime(); if(t&&t<cutoff) delete state.mealPrep.overrides[k]; });
+  const {error}=await sb.from('meal_prep').upsert({user_id:currentUser.id,data:state.mealPrep,updated_at:new Date().toISOString()});
+  if(error) toast('Meal Prep save failed — run meal-prep-setup.sql','var(--red)');
+}
 // AI macro estimate via the ai-macros Edge Function (Claude). Returns {type:'macros',...} or {type:'clarify',...}.
 async function aiMacros(payload){
   const res=await fetch(`${SUPABASE_URL}/functions/v1/ai-macros`,{method:'POST',headers:{'Content-Type':'application/json','apikey':SUPABASE_KEY,'Authorization':`Bearer ${SUPABASE_KEY}`},body:JSON.stringify(payload)});
@@ -897,6 +909,7 @@ function screenKey(){
     case 'nutrition':  return `nutrition:${state.nutritionView}`;
     case 'bodyweight': return `bodyweight:${state.weightView}`;
     case 'history':    return `history:${state.historyTab}`;
+    case 'mealprep':   return `mealprep:${state.mpStep}`;
     default:           return state.view;
   }
 }
@@ -913,7 +926,8 @@ function render(){
     <div class="view ${state.view==='history'?'active':''}">${safeRender(renderHistory,'History')}</div>
     <div class="view ${state.view==='more'?'active':''}">${safeRender(renderMore,'More')}</div>
     <div class="view ${state.view==='admin'?'active':''}">${state.view==='admin'?safeRender(renderAdmin,'Admin'):''}</div>
-    <div class="view ${state.view==='support'?'active':''}">${state.view==='support'?safeRender(renderSupport,'Support'):''}</div>`;
+    <div class="view ${state.view==='support'?'active':''}">${state.view==='support'?safeRender(renderSupport,'Support'):''}</div>
+    <div class="view ${state.view==='mealprep'?'active':''}">${state.view==='mealprep'?safeRender(renderMealPrep,'Meal Prep'):''}</div>`;
   attachEvents();
   const key=screenKey();
   const now=document.querySelector('#views-wrap .view.active');
@@ -968,7 +982,9 @@ function renderNav(){
     {id:'bodyweight',icon:iconScale(),     label:'Weight'},
     {id:'more',      icon:iconList(),      label:'More'},
   ];
-  return `<nav class="nav">${tabs.map(t=>`<button class="nav-btn ${state.view===t.id?'active':''}" data-nav="${t.id}">${t.icon}<span>${t.label}</span></button>`).join('')}</nav>`;
+  // Meal Prep is a Nutrition sub-screen, so its tab stays lit while you're there.
+  const active=state.view==='mealprep'?'nutrition':state.view;
+  return `<nav class="nav">${tabs.map(t=>`<button class="nav-btn ${active===t.id?'active':''}" data-nav="${t.id}">${t.icon}<span>${t.label}</span></button>`).join('')}</nav>`;
 }
 
 // ── LOG ───────────────────────────────────────────────────────────────────────
@@ -1313,6 +1329,161 @@ function renderCalorieBarChart(period){
   </svg>`;
 }
 
+// ── MEAL PREP ─────────────────────────────────────────────────────────────────
+// Weekly meal templates: a meal is built from components (saved items or
+// quick-adds, each with a quantity), assigned a slot + weekdays, and repeats
+// every week. Logging is one tap: the meal's totals land in food_log as ONE
+// entry tagged meal:{mealId,slot}, so checked state is DERIVED from the food
+// log — deleting the entry (from either place) un-checks the meal. Per-date
+// overrides live in mealPrep.overrides[dateKey][slot] = mealId | null.
+const MP_SLOTS=['breakfast','lunch','snack','dinner'];
+const MP_SLOT_LABEL={breakfast:'Breakfast',lunch:'Lunch',snack:'Snack',dinner:'Dinner'};
+const MP_DAY_ORDER=[1,2,3,4,5,6,0];  // Monday-first UI over JS getDay() numbering
+const MP_DAY_CHAR=['S','M','T','W','T','F','S'];
+const MP_DAY_NAME=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+function mealTotals(m){ return (m.components||[]).reduce((a,c)=>{ const q=c.qty||1; return {calories:a.calories+Math.round((c.calories||0)*q),protein:a.protein+Math.round((c.protein||0)*q),carbs:a.carbs+Math.round((c.carbs||0)*q),fat:a.fat+Math.round((c.fat||0)*q)}; },{calories:0,protein:0,carbs:0,fat:0}); }
+function mpDateKey(d){ return d.toLocaleDateString('en-US'); }  // matches food_log dates / todayKey()
+function mpWeekDates(off){ const n=new Date(); const dow=(n.getDay()+6)%7; const mon=new Date(n.getFullYear(),n.getMonth(),n.getDate()-dow+(off||0)*7); return Array.from({length:7},(_,i)=>new Date(mon.getFullYear(),mon.getMonth(),mon.getDate()+i)); }
+function mpPlannedMeal(date,slot){
+  const ov=state.mealPrep.overrides[mpDateKey(date)];
+  if(ov&&(slot in ov)){ const id=ov[slot]; return id?(state.mealPrep.meals.find(m=>m.id===id)||null):null; }
+  return state.mealPrep.meals.find(m=>m.slot===slot&&(m.days||[]).includes(date.getDay()))||null;
+}
+// Checked = a food_log entry for that date tagged with this meal. The same-day
+// name match is a fallback so check-off still works before the food_log.meal
+// column migration (meal-prep-setup.sql) has been run.
+function mpLoggedEntry(dateKey,meal,slot){ return state.foodLog.find(e=>e.date===dateKey&&((e.meal&&e.meal.mealId===meal.id&&e.meal.slot===slot)||e.name===meal.name))||null; }
+function mpDaysStr(m){ return MP_DAY_ORDER.filter(d=>(m.days||[]).includes(d)).map(d=>MP_DAY_NAME[d]).join(' '); }
+function mpLogMeal(mealId,slot){
+  const m=state.mealPrep.meals.find(x=>x.id===mealId); if(!m) return;
+  const t=mealTotals(m);
+  const entry={id:uid(),date:todayKey(),ts:Date.now(),name:m.name,calories:t.calories,protein:t.protein,carbs:t.carbs,fat:t.fat,meal:{mealId:m.id,slot}};
+  state.foodLog.push(entry); render(); toast(`${MP_SLOT_LABEL[slot]} logged · ${t.calories} kcal`);
+  // The meal tag column ships in meal-prep-setup.sql; until it exists this
+  // update fails harmlessly and the name-match fallback covers check-off.
+  dbAddFood(entry).then(()=>{ sb.from('food_log').update({meal:entry.meal}).eq('id',entry.id).then(null,()=>{}); });
+}
+function mpTodaySlotRows(onlyPlanned){
+  const tk=todayKey(); const today=new Date();
+  return MP_SLOTS.map(slot=>{
+    const m=mpPlannedMeal(today,slot);
+    if(!m) return onlyPlanned?'':`<div style="display:flex;align-items:center;gap:10px;border:1px dashed var(--border);border-radius:var(--radius-sm);padding:8px 12px"><div style="width:24px;height:24px;border-radius:50%;border:2px dashed var(--border);flex-shrink:0"></div><div style="flex:1;min-width:0"><div style="font-size:10px;font-weight:800;letter-spacing:.08em;color:var(--text-muted)">${MP_SLOT_LABEL[slot].toUpperCase()}</div><div style="font-size:13px;color:var(--text-muted)">Nothing planned</div></div><button class="btn btn-outline btn-xs" data-mp-new-slot="${slot}" style="flex-shrink:0">+ Plan</button></div>`;
+    const t=mealTotals(m); const logged=mpLoggedEntry(tk,m,slot);
+    return `<div style="display:flex;align-items:center;gap:10px;background:${logged?'var(--green-dim)':'var(--surface2)'};border:1px solid ${logged?'var(--green)':'var(--border)'};border-radius:var(--radius-sm);padding:8px 12px">
+      <div style="width:24px;height:24px;border-radius:50%;flex-shrink:0;${logged?'background:var(--green);color:#fff;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:900':'background:var(--surface);border:2px solid var(--border)'}">${logged?'✓':''}</div>
+      <div style="flex:1;min-width:0"><div style="font-size:10px;font-weight:800;letter-spacing:.08em;color:var(--text-muted)">${MP_SLOT_LABEL[slot].toUpperCase()}</div><div style="font-size:14px;font-weight:700">${esc(m.name)}</div><div style="font-size:11px;color:var(--text-muted)">${t.calories} kcal · P ${t.protein}g · C ${t.carbs}g · F ${t.fat}g &nbsp;${pBadge(t.protein,t.calories)}</div></div>
+      ${logged?`<button class="btn btn-outline btn-xs" data-mp-unlog="${logged.id}" title="Un-log this meal" style="flex-shrink:0;color:var(--green)">✓ ${fmtTime(logged.ts)}</button>`:`<button class="btn btn-primary btn-xs" data-mp-log="${m.id}|${slot}" style="width:auto;flex-shrink:0;padding:8px 16px">Log</button>`}
+    </div>`;
+  }).join('');
+}
+function mpNutritionCard(){
+  if(!state.mealPrep.meals.length) return '';
+  const today=new Date(); const tk=todayKey();
+  const planned=MP_SLOTS.map(s=>({s,m:mpPlannedMeal(today,s)})).filter(x=>x.m);
+  if(!planned.length) return '';
+  const done=planned.filter(x=>mpLoggedEntry(tk,x.m,x.s)).length;
+  return `<div class="card"><div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px"><div class="card-title" style="margin:0">Today's Meal Prep</div><div style="font-size:11px;font-weight:800;color:${done===planned.length?'var(--green)':'var(--text-muted)'}">${done} of ${planned.length} logged</div></div><div class="section-gap">${mpTodaySlotRows(true)}</div></div>`;
+}
+function renderMealPrep(){
+  if(state.mpStep==='builder'&&state.mpDraft) return renderMealBuilder();
+  const meals=state.mealPrep.meals;
+  const dates=mpWeekDates(state.mpWeekOff);
+  const tk=todayKey();
+  const hasToday=dates.some(d=>mpDateKey(d)===tk);
+  const fmtD=d=>d.toLocaleDateString('en-US',{month:'short',day:'numeric'});
+  return `
+    <div style="display:flex;align-items:center;gap:10px"><button class="btn btn-outline btn-sm" id="mp-back-btn">← Back</button><div class="page-title" style="font-size:17px">Meal Prep</div><div style="margin-left:auto">${versionStamp()}</div></div>
+    <div style="display:flex;align-items:center;justify-content:space-between;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-sm);padding:6px 8px">
+      <button class="btn btn-outline btn-sm" id="mp-week-prev" aria-label="Previous week">‹</button>
+      <div style="font-size:13px;font-weight:700">${fmtD(dates[0])} – ${fmtD(dates[6])}${state.mpWeekOff===0?' <span style="color:var(--text-muted);font-weight:600">· this week</span>':''}</div>
+      <button class="btn btn-outline btn-sm" id="mp-week-next" aria-label="Next week">›</button>
+    </div>
+    ${hasToday&&meals.length?`<div class="card" style="border-color:var(--accent)"><div class="card-title" style="color:var(--accent)">Today — ${fmtDate(Date.now())}</div><div class="section-gap">${mpTodaySlotRows(false)}</div></div>`:''}
+    ${meals.length?`<div class="card"><div class="card-title">Week plan</div><div class="section-gap">
+      ${dates.map(d=>{
+        const dk=mpDateKey(d); const isToday=dk===tk;
+        return `<div style="display:flex;align-items:center;gap:8px">
+          <div style="width:46px;font-size:12px;font-weight:800;color:${isToday?'var(--accent)':'var(--text-muted)'};flex-shrink:0">${MP_DAY_NAME[d.getDay()]} ${d.getDate()}</div>
+          <div style="flex:1;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px">
+            ${MP_SLOTS.map(slot=>{
+              const m=mpPlannedMeal(d,slot);
+              const logged=m?mpLoggedEntry(dk,m,slot):null;
+              const st=logged?'background:var(--green-dim);border:1px solid var(--green);color:var(--green)':m?'background:var(--accent-dim);border:1px solid var(--accent);color:var(--accent)':'background:var(--surface);border:1px dashed var(--border);color:var(--text-muted)';
+              return `<button data-mp-cell="${dk}|${slot}" style="${st};border-radius:6px;padding:5px 0;font-size:10px;font-weight:800;cursor:pointer;text-align:center">${MP_SLOT_LABEL[slot][0]}${logged?' ✓':''}</button>`;
+            }).join('')}
+          </div>
+        </div>`;
+      }).join('')}
+      <div style="font-size:10px;color:var(--text-muted)">B L S D = breakfast lunch snack dinner · tap a cell to change that one day</div>
+    </div></div>`:''}
+    <div class="card"><div class="card-title">Your Meals</div>${meals.length?`<div class="section-gap">${meals.map(m=>{const t=mealTotals(m);return `<div style="display:flex;align-items:center;gap:8px"><div style="flex:1;min-width:0"><div style="font-size:14px;font-weight:700">${esc(m.name)}</div><div style="font-size:11px;color:var(--text-muted)">${MP_SLOT_LABEL[m.slot]||m.slot} · ${mpDaysStr(m)||'no days'} · ${t.calories} kcal &nbsp;${pBadge(t.protein,t.calories)}</div></div><button class="btn btn-outline btn-xs" data-mp-edit="${m.id}" style="flex-shrink:0">Edit</button><button class="btn btn-danger btn-xs" data-mp-del="${m.id}" style="flex-shrink:0">✕</button></div>`;}).join('<hr class="divider" style="margin:2px 0">')}</div>`:`<div class="empty">No meals yet — build your first one below.</div>`}</div>
+    <button class="btn btn-primary btn-full" id="mp-new">+ New Meal</button>`;
+}
+function renderMealBuilder(){
+  const d=state.mpDraft;
+  const t=mealTotals(d);
+  return `
+    <div style="display:flex;align-items:center;gap:10px"><button class="btn btn-outline btn-sm" id="mp-cancel">← Back</button><div class="page-title" style="font-size:17px">${d.id?'Edit Meal':'New Meal'}</div></div>
+    <div class="card"><div class="field"><label>Meal name</label><input type="text" id="mp-name" placeholder="e.g. Standard Breakfast"></div></div>
+    <div class="card"><div class="card-title">Components</div>
+      ${d.components.length?`<div class="section-gap">${d.components.map((c,i)=>`<div style="display:flex;align-items:center;gap:8px"><div style="flex:1;min-width:0"><div style="font-size:14px;font-weight:700">${esc(c.name)}</div><div style="font-size:11px;color:var(--text-muted)">${c.calories} kcal · P ${c.protein}g each</div></div><div style="display:flex;align-items:center;flex-shrink:0"><button class="btn btn-outline btn-xs" data-mp-cqty="${i}|-1" aria-label="Fewer">−</button><div style="width:28px;text-align:center;font-size:14px;font-weight:800">${c.qty}</div><button class="btn btn-outline btn-xs" data-mp-cqty="${i}|1" aria-label="More">+</button></div><div style="width:56px;text-align:right;font-size:12px;font-weight:800;flex-shrink:0">${Math.round((c.calories||0)*(c.qty||1))} kcal</div><button class="btn btn-danger btn-xs" data-mp-crem="${i}" aria-label="Remove">✕</button></div>`).join('')}</div>`:`<div class="empty" style="padding:6px 0">Add components from your saved items or quick-add one-offs.</div>`}
+      <div class="btn-grid" style="margin-top:10px"><button class="btn btn-outline" id="mp-add-saved">+ Saved Items</button><button class="btn btn-outline" id="mp-add-quick">+ Quick Add</button></div>
+    </div>
+    <div class="card"><div class="card-title">Meal totals</div>
+      <div style="display:flex;align-items:baseline;justify-content:center;gap:8px"><div style="font-size:30px;font-weight:900">${t.calories}</div><div style="font-size:13px;color:var(--text-muted);font-weight:600">kcal</div>${pBadge(t.protein,t.calories)}</div>
+      <div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin-top:10px">
+        <div style="background:var(--surface2);border-radius:var(--radius-sm);padding:8px;text-align:center"><div style="font-size:10px;font-weight:800;color:var(--text-muted)">PROTEIN</div><div style="font-size:16px;font-weight:800">${t.protein}g</div></div>
+        <div style="background:var(--surface2);border-radius:var(--radius-sm);padding:8px;text-align:center"><div style="font-size:10px;font-weight:800;color:var(--text-muted)">CARBS</div><div style="font-size:16px;font-weight:800">${t.carbs}g</div></div>
+        <div style="background:var(--surface2);border-radius:var(--radius-sm);padding:8px;text-align:center"><div style="font-size:10px;font-weight:800;color:var(--text-muted)">FAT</div><div style="font-size:16px;font-weight:800">${t.fat}g</div></div>
+      </div>
+    </div>
+    <div class="card"><div class="card-title">Schedule</div>
+      <label>Meal slot</label>
+      <div class="toggle-group">${MP_SLOTS.map(s=>`<div class="toggle-opt ${d.slot===s?'active':''}" data-mp-slot="${s}" style="font-size:12px;padding:9px 0">${MP_SLOT_LABEL[s]}</div>`).join('')}</div>
+      <label style="margin-top:12px">Days — repeats every week</label>
+      <div style="display:flex;justify-content:space-between;gap:4px">${MP_DAY_ORDER.map(dw=>`<button data-mp-day="${dw}" aria-label="${MP_DAY_NAME[dw]}${d.days.includes(dw)?', selected':''}" style="width:40px;height:40px;border-radius:50%;${d.days.includes(dw)?'background:var(--accent);color:#fff;border:none':'background:var(--surface);color:var(--text-muted);border:1px solid var(--border)'};font-size:13px;font-weight:800;cursor:pointer;flex-shrink:0">${MP_DAY_CHAR[dw]}</button>`).join('')}</div>
+    </div>
+    <button class="btn btn-green btn-full" id="mp-save">Save Meal</button>`;
+}
+function showMpSavedPicker(){
+  const favs=sortedFavorites();
+  document.getElementById('modal-root').innerHTML=`<div class="modal-overlay" id="modal-overlay"><div class="modal" style="max-height:88vh;overflow-y:auto"><div class="modal-title">Add from Saved Items</div>${favs.length?`<div class="section-gap">${favs.map(f=>`<div style="display:flex;align-items:center;gap:10px"><div style="flex:1;min-width:0"><div style="font-size:14px;font-weight:700">${esc(f.name)}</div><div style="font-size:12px;color:var(--text-muted)">${f.calories} kcal · P:${f.protein}g C:${f.carbs}g F:${f.fat}g</div></div><button class="btn btn-outline btn-xs" data-mp-pick="${f.id}" style="flex-shrink:0">+ Add</button></div>`).join('<hr class="divider" style="margin:2px 0">')}</div>`:`<div class="empty">No saved items yet — star foods in your log to save them, or use Quick Add.</div>`}<button class="btn btn-primary btn-full" id="mp-pick-done" style="margin-top:12px">Done</button></div></div>`;
+  document.getElementById('modal-overlay').addEventListener('click',e=>{ if(e.target===e.currentTarget){ closeModal(); render(); } });
+  document.getElementById('mp-pick-done').addEventListener('click',()=>{ closeModal(); render(); });
+  document.querySelectorAll('[data-mp-pick]').forEach(b=>b.addEventListener('click',()=>{
+    const f=state.mealFavorites.find(x=>x.id===b.dataset.mpPick); if(!f||!state.mpDraft) return;
+    const ex=state.mpDraft.components.find(c=>c.name===f.name);
+    if(ex) ex.qty=(ex.qty||1)+1; else state.mpDraft.components.push({name:f.name,qty:1,calories:f.calories||0,protein:f.protein||0,carbs:f.carbs||0,fat:f.fat||0});
+    toast(`Added: ${f.name}`);
+  }));
+}
+function showMpQuickAdd(){
+  document.getElementById('modal-root').innerHTML=`<div class="modal-overlay" id="modal-overlay"><div class="modal"><div class="modal-title">Quick Add Component</div><div class="field"><label>Name</label><input type="text" id="mpq-name" placeholder="e.g. Egg (large)"></div><div class="field"><label>Calories (kcal, per unit)</label><input type="number" id="mpq-cal" placeholder="0"></div><div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px"><div class="field"><label>Protein (g)</label><input type="number" id="mpq-pro" placeholder="0"></div><div class="field"><label>Carbs (g)</label><input type="number" id="mpq-carb" placeholder="0"></div><div class="field"><label>Fat (g)</label><input type="number" id="mpq-fat" placeholder="0"></div></div><div class="btn-grid"><button class="btn btn-outline" id="modal-cancel">Cancel</button><button class="btn btn-primary" id="mpq-add">Add</button></div></div></div>`;
+  document.getElementById('modal-cancel').addEventListener('click',closeModal);
+  document.getElementById('modal-overlay').addEventListener('click',e=>{ if(e.target===e.currentTarget) closeModal(); });
+  document.getElementById('mpq-name').focus();
+  document.getElementById('mpq-add').addEventListener('click',()=>{
+    const name=document.getElementById('mpq-name').value.trim();
+    if(!name){ toast('Give the component a name','var(--red)'); return; }
+    if(!state.mpDraft) return;
+    state.mpDraft.components.push({name,qty:1,calories:parseFloat(document.getElementById('mpq-cal').value)||0,protein:parseFloat(document.getElementById('mpq-pro').value)||0,carbs:parseFloat(document.getElementById('mpq-carb').value)||0,fat:parseFloat(document.getElementById('mpq-fat').value)||0});
+    closeModal(); render();
+  });
+}
+function showMpOverridePicker(dateKey,slot){
+  const meals=[...state.mealPrep.meals].sort((a,b)=>(a.slot===slot?0:1)-(b.slot===slot?0:1));
+  document.getElementById('modal-root').innerHTML=`<div class="modal-overlay" id="modal-overlay"><div class="modal" style="max-height:88vh;overflow-y:auto"><div class="modal-title">${MP_SLOT_LABEL[slot]} — ${dateKey}</div><div style="font-size:12px;color:var(--text-muted);margin-bottom:12px">Changes this one day only; the weekly plan stays as it is.</div><div class="section-gap">${meals.map(m=>{const t=mealTotals(m);return `<button class="btn btn-outline btn-full" data-mp-ovr="${m.id}" style="justify-content:space-between"><span>${esc(m.name)}</span><span style="color:var(--text-muted);font-size:12px">${t.calories} kcal</span></button>`;}).join('')}<button class="btn btn-outline btn-full" data-mp-ovr="none">No meal this day</button><button class="btn btn-outline btn-full" data-mp-ovr="auto">Follow weekly plan</button></div><button class="btn btn-outline btn-full" id="modal-cancel" style="margin-top:12px">Cancel</button></div></div>`;
+  document.getElementById('modal-cancel').addEventListener('click',closeModal);
+  document.getElementById('modal-overlay').addEventListener('click',e=>{ if(e.target===e.currentTarget) closeModal(); });
+  document.querySelectorAll('[data-mp-ovr]').forEach(b=>b.addEventListener('click',()=>{
+    const v=b.dataset.mpOvr;
+    const ov=state.mealPrep.overrides;
+    if(v==='auto'){ if(ov[dateKey]){ delete ov[dateKey][slot]; if(!Object.keys(ov[dateKey]).length) delete ov[dateKey]; } }
+    else{ ov[dateKey]=ov[dateKey]||{}; ov[dateKey][slot]=v==='none'?null:v; }
+    dbSaveMealPrep(); closeModal(); render();
+  }));
+}
+
 // ── NUTRITION ─────────────────────────────────────────────────────────────────
 function renderNutrition(){
   const todayEntries=state.foodLog.filter(e=>e.date===todayKey());
@@ -1321,15 +1492,16 @@ function renderNutrition(){
   const view=state.nutritionView;
   const period=state.nutritionPeriod;
   return `
-    <div class="page-header"><div><div class="page-title">Nutrition</div><div class="subtitle">${fmtDate(Date.now())}</div></div><div style="display:flex;align-items:center;gap:8px">${versionStamp()}<button class="btn btn-outline btn-sm" id="edit-goals-btn">Goals</button></div></div>
+    <div class="page-header"><div><div class="page-title">Nutrition</div><div class="subtitle">${fmtDate(Date.now())}</div></div><div style="display:flex;align-items:center;gap:8px">${versionStamp()}<button class="btn btn-outline btn-sm" id="meal-prep-btn">Meal Prep</button><button class="btn btn-outline btn-sm" id="edit-goals-btn">Goals</button></div></div>
     <div class="card"><div class="card-title">Today's Totals</div><div style="text-align:center;margin-bottom:14px;cursor:pointer" onclick="state.calorieDisplay=state.calorieDisplay==='remaining'?'total':'remaining';render()">${(()=>{const rem=g.calories-totals.calories;if(state.calorieDisplay==='remaining'){return rem>=0?`<div style="font-size:42px;font-weight:800;color:var(--text)">${rem}</div><div style="font-size:13px;color:var(--text-muted)">remaining of ${g.calories} kcal goal</div>`:`<div style="font-size:42px;font-weight:800;color:var(--amber)">${Math.abs(rem)}</div><div style="font-size:13px;color:var(--amber)">over your ${g.calories} kcal goal</div>`;}return `<div style="font-size:42px;font-weight:800;color:var(--text)">${totals.calories}</div><div style="font-size:13px;color:var(--text-muted)">of ${g.calories} kcal goal</div>`;})()}<div style="font-size:10px;color:var(--text-muted);margin-top:4px;opacity:.7">tap to ${state.calorieDisplay==='remaining'?'show total':'show remaining'}</div></div>${macroBar('Protein','var(--accent)',totals.protein,g.protein,'g',pBadge(totals.protein,totals.calories))}<div style="margin-top:10px">${macroBar('Carbs','var(--green)',totals.carbs,g.carbs,'g')}</div><div style="margin-top:10px">${macroBar('Fat','var(--amber)',totals.fat,g.fat,'g')}</div></div>
     <div class="toggle-group">
       <div class="toggle-opt ${view==='log'?'active':''}" onclick="state.nutritionView='log';render()">Log</div>
       <div class="toggle-opt ${view==='chart'?'active':''}" onclick="state.nutritionView='chart';render()">Chart</div>
     </div>
     ${view==='log'?`
+      ${mpNutritionCard()}
       <button class="btn btn-primary" id="add-food-btn">+ Add Food / Meal</button>
-      ${todayEntries.length?`<div class="card"><div class="card-title">Today's Log</div><div class="section-gap">${[...todayEntries].reverse().map(e=>`<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:8px"><div style="flex:1;min-width:0"><div style="font-size:14px;font-weight:700;color:var(--text)">${esc(e.name)}</div><div style="font-size:12px;color:var(--text-muted);margin-top:2px">${fmtTime(e.ts)} · P:${e.protein}g C:${e.carbs}g F:${e.fat}g &nbsp;${pBadge(e.protein,e.calories)}</div></div><div style="text-align:right;flex-shrink:0;display:flex;flex-direction:column;align-items:flex-end;gap:4px"><div style="font-size:16px;font-weight:800;color:var(--text)">${e.calories} kcal</div><div style="display:flex;gap:6px"><button class="btn btn-xs ${isMealFav(e)?'btn-amber':'btn-outline'}" data-fav-food="${e.id}" title="${isMealFav(e)?'Remove from favorites':'Save as favorite'}">★</button><button class="btn btn-xs btn-danger" data-del-food="${e.id}">✕</button></div></div></div>`).join('<hr class="divider" style="margin:2px 0">')}</div></div>`:''}
+      ${todayEntries.length?`<div class="card"><div class="card-title">Today's Log</div><div class="section-gap">${[...todayEntries].reverse().map(e=>`<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:8px"><div style="flex:1;min-width:0"><div style="font-size:14px;font-weight:700;color:var(--text)">${esc(e.name)}${e.meal?' <span style="background:var(--accent-dim);border:1px solid var(--accent);color:var(--accent);border-radius:9px;padding:0 6px;font-size:9px;font-weight:800;letter-spacing:.05em;vertical-align:1px">MEAL PREP</span>':''}</div><div style="font-size:12px;color:var(--text-muted);margin-top:2px">${fmtTime(e.ts)} · P:${e.protein}g C:${e.carbs}g F:${e.fat}g &nbsp;${pBadge(e.protein,e.calories)}</div></div><div style="text-align:right;flex-shrink:0;display:flex;flex-direction:column;align-items:flex-end;gap:4px"><div style="font-size:16px;font-weight:800;color:var(--text)">${e.calories} kcal</div><div style="display:flex;gap:6px"><button class="btn btn-xs ${isMealFav(e)?'btn-amber':'btn-outline'}" data-fav-food="${e.id}" title="${isMealFav(e)?'Remove from favorites':'Save as favorite'}">★</button><button class="btn btn-xs btn-danger" data-del-food="${e.id}">✕</button></div></div></div>`).join('<hr class="divider" style="margin:2px 0">')}</div></div>`:''}
       ${state.mealFavorites.length?`<div class="card"><div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;gap:8px"><div class="card-title" style="margin:0">Favorites</div><div class="toggle-group" style="width:auto;display:inline-flex;flex:0 0 auto"><div class="toggle-opt ${state.favSort==='recent'?'active':''}" onclick="state.favSort='recent';localStorage.setItem('li_fav_sort','recent');render()" style="padding:4px 12px;font-size:12px">Recent</div><div class="toggle-opt ${state.favSort==='alpha'?'active':''}" onclick="state.favSort='alpha';localStorage.setItem('li_fav_sort','alpha');render()" style="padding:4px 12px;font-size:12px">A–Z</div><div class="toggle-opt ${state.favSort==='protein'?'active':''}" onclick="state.favSort='protein';localStorage.setItem('li_fav_sort','protein');render()" style="padding:4px 12px;font-size:12px" title="Highest protein density first">P %</div></div></div><div class="section-gap">${sortedFavorites().map(f=>`<div style="display:flex;align-items:center;gap:10px"><div style="flex:1;min-width:0;cursor:pointer" data-edit-fav="${f.id}" title="Edit favorite"><div style="font-size:14px;font-weight:700;color:var(--text)">${esc(f.name)}</div><div style="font-size:12px;color:var(--text-muted);margin-top:1px">${f.calories} kcal · P:${f.protein}g C:${f.carbs}g F:${f.fat}g &nbsp;${pBadge(f.protein,f.calories)}</div></div><button class="btn btn-outline btn-xs" data-log-fav="${f.id}" style="flex-shrink:0">+ Log</button><button class="fav-del" data-del-fav="${f.id}" title="Remove favorite">★</button></div>`).join('<hr class="divider" style="margin:2px 0">')}</div></div>`:''}
       <div style="font-size:11px;color:var(--text-muted);text-align:center">Export all data from the Plans tab (Workouts)</div>
     `:`
@@ -2018,6 +2190,44 @@ function attachEvents(){
   document.querySelectorAll('[data-edit-fav]').forEach(b=>b.addEventListener('click',()=>showEditFavModal(b.dataset.editFav)));
   document.querySelectorAll('[data-del-fav]').forEach(b=>b.addEventListener('click',()=>{ const id=b.dataset.delFav; state.mealFavorites=state.mealFavorites.filter(f=>f.id!==id); render(); dbDeleteMealFav(id); }));
 
+  // ── Meal Prep ──
+  el('meal-prep-btn',()=>{ state.view='mealprep'; state.mpStep='week'; state.mpWeekOff=0; render(); });
+  el('mp-back-btn',()=>{ state.view='nutrition'; render(); });
+  el('mp-week-prev',()=>{ state.mpWeekOff--; render(); });
+  el('mp-week-next',()=>{ state.mpWeekOff++; render(); });
+  el('mp-new',()=>{ state.mpDraft={id:null,name:'',components:[],slot:'breakfast',days:[]}; state.mpStep='builder'; state.view='mealprep'; render(); });
+  document.querySelectorAll('[data-mp-new-slot]').forEach(b=>b.addEventListener('click',()=>{ state.mpDraft={id:null,name:'',components:[],slot:b.dataset.mpNewSlot,days:[new Date().getDay()]}; state.mpStep='builder'; state.view='mealprep'; render(); }));
+  document.querySelectorAll('[data-mp-log]').forEach(b=>b.addEventListener('click',()=>{ const [id,slot]=b.dataset.mpLog.split('|'); mpLogMeal(id,slot); }));
+  document.querySelectorAll('[data-mp-unlog]').forEach(b=>b.addEventListener('click',()=>{ if(!confirm('Un-log this meal? Its entry is removed from today\'s food log.')) return; const id=b.dataset.mpUnlog; state.foodLog=state.foodLog.filter(e=>e.id!==id); render(); toast('Meal un-logged'); dbDeleteFood(id); }));
+  document.querySelectorAll('[data-mp-cell]').forEach(b=>b.addEventListener('click',()=>{ const [dk,slot]=b.dataset.mpCell.split('|'); showMpOverridePicker(dk,slot); }));
+  document.querySelectorAll('[data-mp-edit]').forEach(b=>b.addEventListener('click',()=>{ const m=state.mealPrep.meals.find(x=>x.id===b.dataset.mpEdit); if(!m) return; state.mpDraft=JSON.parse(JSON.stringify(m)); state.mpStep='builder'; render(); }));
+  document.querySelectorAll('[data-mp-del]').forEach(b=>b.addEventListener('click',()=>{ const m=state.mealPrep.meals.find(x=>x.id===b.dataset.mpDel); if(!m) return; if(!confirm(`Delete "${m.name}"? Already-logged entries stay in your food log.`)) return; state.mealPrep.meals=state.mealPrep.meals.filter(x=>x.id!==m.id); dbSaveMealPrep(); render(); toast('Meal deleted'); }));
+  // Builder. The name input syncs the draft on every keystroke (no re-render,
+  // so typing never loses focus); other controls re-render as usual.
+  { const ni=document.getElementById('mp-name'); if(ni&&state.mpDraft){ ni.value=state.mpDraft.name||''; ni.addEventListener('input',()=>{ state.mpDraft.name=ni.value; }); } }
+  el('mp-cancel',()=>{ state.mpStep='week'; state.mpDraft=null; render(); });
+  document.querySelectorAll('[data-mp-slot]').forEach(b=>b.addEventListener('click',()=>{ if(state.mpDraft){ state.mpDraft.slot=b.dataset.mpSlot; render(); } }));
+  document.querySelectorAll('[data-mp-day]').forEach(b=>b.addEventListener('click',()=>{ if(!state.mpDraft) return; const dw=parseInt(b.dataset.mpDay); const i=state.mpDraft.days.indexOf(dw); if(i>=0) state.mpDraft.days.splice(i,1); else state.mpDraft.days.push(dw); render(); }));
+  document.querySelectorAll('[data-mp-cqty]').forEach(b=>b.addEventListener('click',()=>{ const [i,dir]=b.dataset.mpCqty.split('|').map(Number); const c=state.mpDraft&&state.mpDraft.components[i]; if(!c) return; c.qty=Math.max(1,(c.qty||1)+dir); render(); }));
+  document.querySelectorAll('[data-mp-crem]').forEach(b=>b.addEventListener('click',()=>{ if(!state.mpDraft) return; state.mpDraft.components.splice(parseInt(b.dataset.mpCrem),1); render(); }));
+  el('mp-add-saved',showMpSavedPicker);
+  el('mp-add-quick',showMpQuickAdd);
+  el('mp-save',()=>{
+    const d=state.mpDraft; if(!d) return;
+    const ni=document.getElementById('mp-name'); if(ni) d.name=ni.value;
+    d.name=(d.name||'').trim();
+    if(!d.name){ toast('Give the meal a name','var(--red)'); return; }
+    if(!d.components.length){ toast('Add at least one component','var(--red)'); return; }
+    if(!d.days.length){ toast('Pick at least one day','var(--red)'); return; }
+    // Two meals on the same slot+day: the earlier-created one wins in planning,
+    // so warn rather than silently shadowing.
+    const clash=state.mealPrep.meals.find(m=>m.id!==d.id&&m.slot===d.slot&&(m.days||[]).some(x=>d.days.includes(x)));
+    if(clash&&!confirm(`"${clash.name}" already covers some of those days for ${MP_SLOT_LABEL[d.slot].toLowerCase()}. Where they overlap, the earlier meal is used. Save anyway?`)) return;
+    if(d.id){ const i=state.mealPrep.meals.findIndex(m=>m.id===d.id); if(i>=0) state.mealPrep.meals[i]=d; }
+    else{ d.id=uid(); d.created_at=new Date().toISOString(); state.mealPrep.meals.push(d); }
+    dbSaveMealPrep(); state.mpStep='week'; state.mpDraft=null; render(); toast('Meal saved ✓');
+  });
+
   el('log-weight-btn',()=>{
     const input=document.getElementById('wt-input'); const val=parseFloat(input.value);
     if(!val||val<=0){ toast('Enter a valid weight','var(--red)'); return; }
@@ -2151,6 +2361,7 @@ function exportAllCSV(){ try{
   rows.push(['Calories (kcal)','Protein (g)','Carbs (g)','Fat (g)','','','']);
   rows.push([state.macroGoals.calories,state.macroGoals.protein,state.macroGoals.carbs,state.macroGoals.fat,'','','']);
   if(state.mealFavorites.length){ rows.push(blank); rows.push(['MEAL FAVORITES','','','','','','']); rows.push(['Name','Calories (kcal)','Protein (g)','Carbs (g)','Fat (g)','','']); state.mealFavorites.forEach(f=>rows.push([f.name,f.calories,f.protein,f.carbs,f.fat,'',''])); }
+  if(state.mealPrep&&state.mealPrep.meals.length){ rows.push(blank); rows.push(['MEAL PREP PLAN','','','','','','']); rows.push(['Meal','Slot','Days','Calories (kcal)','Protein (g)','Carbs (g)','Fat (g)']); state.mealPrep.meals.forEach(m=>{ const t=mealTotals(m); rows.push([m.name,MP_SLOT_LABEL[m.slot]||m.slot,mpDaysStr(m),t.calories,t.protein,t.carbs,t.fat]); }); }
   const csv=rows.map(r=>r.map(v=>`"${String(v).replace(/"/g,'""')}"`).join(',')).join('\n');
   const a=document.createElement('a'); a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv'})); a.download=`lockin-export-${date}.csv`; a.click();
   toast('Exported! 📥');
