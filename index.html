@@ -405,7 +405,7 @@ async function deleteTicket(id){
   await loadSupportTickets(true); toast('Ticket deleted'); render();
 }
 
-const APP_VERSION = '2.32.1';
+const APP_VERSION = '2.32.2';
 const OWNER_UID     = '031a65ed-f52d-4a67-b271-47778e920c22';
 // Invite code from the URL (?invite=CODE) — drives the invite-only signup flow.
 let pendingInvite = new URLSearchParams(location.search).get('invite');
@@ -1331,7 +1331,7 @@ function renderNutrition(){
       <button class="btn btn-primary" id="add-food-btn">+ Add Food / Meal</button>
       ${todayEntries.length?`<div class="card"><div class="card-title">Today's Log</div><div class="section-gap">${[...todayEntries].reverse().map(e=>`<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:8px"><div style="flex:1;min-width:0"><div style="font-size:14px;font-weight:700;color:var(--text)">${esc(e.name)}</div><div style="font-size:12px;color:var(--text-muted);margin-top:2px">${fmtTime(e.ts)} · P:${e.protein}g C:${e.carbs}g F:${e.fat}g &nbsp;${pBadge(e.protein,e.calories)}</div></div><div style="text-align:right;flex-shrink:0;display:flex;flex-direction:column;align-items:flex-end;gap:4px"><div style="font-size:16px;font-weight:800;color:var(--text)">${e.calories} kcal</div><div style="display:flex;gap:6px"><button class="btn btn-xs ${isMealFav(e)?'btn-amber':'btn-outline'}" data-fav-food="${e.id}" title="${isMealFav(e)?'Remove from favorites':'Save as favorite'}">★</button><button class="btn btn-xs btn-danger" data-del-food="${e.id}">✕</button></div></div></div>`).join('<hr class="divider" style="margin:2px 0">')}</div></div>`:''}
       ${state.mealFavorites.length?`<div class="card"><div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;gap:8px"><div class="card-title" style="margin:0">Favorites</div><div class="toggle-group" style="width:auto;display:inline-flex;flex:0 0 auto"><div class="toggle-opt ${state.favSort==='recent'?'active':''}" onclick="state.favSort='recent';localStorage.setItem('li_fav_sort','recent');render()" style="padding:4px 12px;font-size:12px">Recent</div><div class="toggle-opt ${state.favSort==='alpha'?'active':''}" onclick="state.favSort='alpha';localStorage.setItem('li_fav_sort','alpha');render()" style="padding:4px 12px;font-size:12px">A–Z</div><div class="toggle-opt ${state.favSort==='protein'?'active':''}" onclick="state.favSort='protein';localStorage.setItem('li_fav_sort','protein');render()" style="padding:4px 12px;font-size:12px" title="Highest protein density first">P %</div></div></div><div class="section-gap">${sortedFavorites().map(f=>`<div style="display:flex;align-items:center;gap:10px"><div style="flex:1;min-width:0;cursor:pointer" data-edit-fav="${f.id}" title="Edit favorite"><div style="font-size:14px;font-weight:700;color:var(--text)">${esc(f.name)}</div><div style="font-size:12px;color:var(--text-muted);margin-top:1px">${f.calories} kcal · P:${f.protein}g C:${f.carbs}g F:${f.fat}g &nbsp;${pBadge(f.protein,f.calories)}</div></div><button class="btn btn-outline btn-xs" data-log-fav="${f.id}" style="flex-shrink:0">+ Log</button><button class="fav-del" data-del-fav="${f.id}" title="Remove favorite">★</button></div>`).join('<hr class="divider" style="margin:2px 0">')}</div></div>`:''}
-      <div style="font-size:11px;color:var(--text-muted);text-align:center">Export all data from the History tab</div>
+      <div style="font-size:11px;color:var(--text-muted);text-align:center">Export all data from the Plans tab (Workouts)</div>
     `:`
       <div style="display:flex;gap:6px;overflow-x:auto;padding-bottom:2px;flex-shrink:0">
         ${PERIODS.map(p=>`<button class="period-btn ${period===p?'active':''}" onclick="state.nutritionPeriod='${p}';render()">${p}</button>`).join('')}
@@ -1397,7 +1397,7 @@ function renderBodyweight(){
         ${log.slice(0,30).map(e=>`<div class="wt-row"><div class="wt-date">${fmtDate(e.date)}</div><div style="display:flex;align-items:center;gap:10px"><div class="wt-val">${displayWeight(e)}</div><button class="wt-del" data-del-wt="${e.id}">✕</button></div></div>`).join('')}
       </div>
     `}
-    <div style="font-size:11px;color:var(--text-muted);text-align:center">Export all data from the History tab</div>`:''}`;
+    <div style="font-size:11px;color:var(--text-muted);text-align:center">Export all data from the Plans tab (Workouts)</div>`:''}`;
 }
 
 // ── HISTORY ───────────────────────────────────────────────────────────────────
@@ -2383,7 +2383,7 @@ const PRIVACY_POLICY = `<div style="font-size:14px;line-height:1.8;color:var(--t
 <p style="margin-bottom:14px">If you sign in using Google, Google authenticates your identity and shares your email address with us. We do not receive your Google password or any other Google account data. Google's handling of your data is governed by Google's Privacy Policy.</p>
 
 <p style="font-weight:800;margin-bottom:6px;color:var(--accent)">7. YOUR RIGHTS</p>
-<p style="margin-bottom:14px">You have the right to export all your data at any time using the Export function in the History tab, correct your data within the app, delete your account and all associated data from the More tab, and contact us at lockinstrength@gmail.com with any privacy questions.</p>
+<p style="margin-bottom:14px">You have the right to export all your data at any time using the Export function in the Plans tab, correct your data within the app, delete your account and all associated data from the More tab, and contact us at lockinstrength@gmail.com with any privacy questions.</p>
 
 <p style="font-weight:800;margin-bottom:6px;color:var(--accent)">8. CHANGES TO THIS POLICY</p>
 <p style="margin-bottom:14px">We may update this Privacy Policy from time to time. The Effective Date at the top will reflect the most recent revision. Continued use of the app after a policy change constitutes acceptance of the updated terms.</p>
