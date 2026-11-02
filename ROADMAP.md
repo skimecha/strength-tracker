@@ -90,6 +90,10 @@ an existing account stays in Phase 4 (client consent required).
   Confirm, and Password Reset emails.
 
 ### Later / parked
+- **Effective volume view** — weekly set bars that count only sets flagged
+  Near Failure / Failure (v2.32.0 effort flags). Wait until a few weeks of
+  flagged history exist; shipping it now would zero everyone's bars since all
+  pre-flag sets are unflagged. Likely a Plan-tab toggle, default off.
 - **Meal planning** (builds on nutrition visibility).
 - **Organization accounts** (gym-level): all trainers in an org can access org
   clients. Trigger to build: a gym owner wants to buy, or pilot trainers ask to
