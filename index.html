@@ -151,6 +151,9 @@ select:focus,input:focus{outline:none;border-color:var(--accent)}
 .set-badge{font-size:11px;font-weight:800;width:36px;flex-shrink:0;text-align:center}
 .set-badge.warmup{color:var(--amber)}
 .set-badge.working{color:var(--green)}
+.eff-tag{font-size:10px;font-weight:800;border-radius:20px;padding:2px 7px;flex-shrink:0;border:1px solid}
+.eff-tag.nf{color:var(--amber);background:var(--amber-dim);border-color:var(--amber)}
+.eff-tag.f{color:var(--red);background:var(--red-dim);border-color:var(--red)}
 .set-info{flex:1;font-size:15px;font-weight:600;color:var(--text)}
 .set-del{background:none;border:none;color:var(--red);font-size:18px;cursor:pointer;padding:4px 6px}
 .history-session{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:14px}
@@ -402,7 +405,7 @@ async function deleteTicket(id){
   await loadSupportTickets(true); toast('Ticket deleted'); render();
 }
 
-const APP_VERSION = '2.31.2';
+const APP_VERSION = '2.32.0';
 const OWNER_UID     = '031a65ed-f52d-4a67-b271-47778e920c22';
 // Invite code from the URL (?invite=CODE) — drives the invite-only signup flow.
 let pendingInvite = new URLSearchParams(location.search).get('invite');
@@ -478,7 +481,7 @@ let currentUser = null;
 let state = {
   view:'log',logStep:'workout',
   selectedMuscle:null,selectedExercise:null,selectedGroup:null,
-  setType:'working',weight:45,reps:10,weightInc:5,repsInc:1,
+  setType:'working',effort:'std',weight:45,reps:10,weightInc:5,repsInc:1,
   pendingSets:[],_currentSession:null,_resumedSnapshot:null,
   split:null,splitIdx:0,splitPicking:false,
   sessions:[],prs:{},favorites:[],customExercises:[],exerciseSettings:{},
@@ -930,7 +933,7 @@ function persistDraft(){
       localStorage.setItem(DRAFT_KEY, JSON.stringify({
         v:1, cur:state._currentSession, snap:state._resumedSnapshot, pending:state.pendingSets,
         group:state.selectedGroup, muscle:state.selectedMuscle, exercise:state.selectedExercise,
-        logStep:state.logStep, setType:state.setType,
+        logStep:state.logStep, setType:state.setType, effort:state.effort,
         split:state.split, splitIdx:state.splitIdx,
       }));
     } else localStorage.removeItem(DRAFT_KEY);
@@ -950,6 +953,7 @@ function restoreDraft(){
   if(d.exercise!==undefined) state.selectedExercise=d.exercise;
   if(d.logStep) state.logStep=d.logStep;
   if(d.setType) state.setType=d.setType;
+  if(d.effort) state.effort=d.effort;
   // A resumed session is still in the DB, so loadUserData reloaded it — drop that
   // copy from history so it isn't shown twice (it's the active workout now).
   if(state._currentSession) state.sessions=state.sessions.filter(s=>s.id!==state._currentSession.id);
@@ -1100,8 +1104,11 @@ function renderSets(){
       <div style="margin-top:14px"><label>Reps</label>
       <div class="stepper"><button class="stepper-btn" data-adj="reps" data-dir="-1">−</button><div class="stepper-val" id="sv-reps">${state.reps}</div><button class="stepper-btn" data-adj="reps" data-dir="1">+</button></div>
       <div class="increments">${[1,2,5,10].map(v=>`<div class="inc-btn ${state.repsInc===v?'active':''}" data-rinc="${v}">${v}</div>`).join('')}</div></div>
+      ${state.setType==='working'?`<div style="margin-top:14px"><label>Effort</label>
+      <div class="toggle-group"><div class="toggle-opt ${state.effort==='std'?'active':''}" data-effort="std" style="font-size:13px">Standard</div><div class="toggle-opt ${state.effort==='nf'?'active':''}" data-effort="nf" style="font-size:13px">Near Failure</div><div class="toggle-opt ${state.effort==='f'?'active':''}" data-effort="f" style="font-size:13px">Failure</div></div>
+      <div style="font-size:11px;color:var(--text-muted);margin-top:6px">Near failure = 2–3 reps in reserve · Failure = nothing left</div></div>`:''}
     </div>
-    ${state.pendingSets.length?`<div class="card"><div class="card-title">Logged Sets</div><div class="section-gap">${state.pendingSets.map((s,i)=>`<div class="set-row"><div class="set-badge ${s.type}">${s.type==='warmup'?'WU':'W'+workingIdx(i)}</div><div class="set-info">${fmtLift(s.weight)} × ${s.reps} reps</div><button class="set-del" data-del="${i}">✕</button></div>`).join('')}</div></div>`:''}
+    ${state.pendingSets.length?`<div class="card"><div class="card-title">Logged Sets</div><div class="section-gap">${state.pendingSets.map((s,i)=>`<div class="set-row"><div class="set-badge ${s.type}">${s.type==='warmup'?'WU':'W'+workingIdx(i)}</div><div class="set-info">${fmtLift(s.weight)} × ${s.reps} reps</div>${effTag(s)}<button class="set-del" data-del="${i}">✕</button></div>`).join('')}</div></div>`:''}
     <button class="btn btn-primary btn-full" id="log-set">+ Log Set</button>
     ${renderTimer()}
     <hr class="divider">
@@ -1113,6 +1120,11 @@ function renderSets(){
 
 function workingIdx(i){ let n=0; for(let j=0;j<=i;j++){ if(state.pendingSets[j].type==='working') n++; } return n; }
 
+// Effort badges (proximity to failure). Sets without .effort are 'standard' —
+// every set logged before v2.32.0 — and render unchanged.
+function effTag(s){ return s.effort==='f'?'<span class="eff-tag f">F</span>':s.effort==='nf'?'<span class="eff-tag nf">NF</span>':''; }
+function effMark(s){ return s.effort==='f'?' <span style="color:var(--red);font-weight:800;font-size:10px">F</span>':s.effort==='nf'?' <span style="color:var(--amber);font-weight:800;font-size:10px">NF</span>':''; }
+
 function renderExerciseHistory(exercise){
   const past=[];
   state.sessions.forEach(s=>{ s.exercises.forEach(ex=>{ if(ex.type==='cardio') return; if(ex.name===exercise){ const working=ex.sets.filter(s=>s.type==='working'); if(working.length) past.push({date:s.date,sets:working}); } }); });
@@ -1121,7 +1133,7 @@ function renderExerciseHistory(exercise){
   const shown=past.slice(0,8);
   const assisted=isAssisted(exercise);
   let overallBest=null; past.forEach(session=>{ const s=bestSet(session.sets,assisted); if(betterPR(s,overallBest,assisted)) overallBest=s; });
-  return `<div style="margin-top:8px;border-top:2px dashed var(--border);padding-top:16px"><div class="card-title" style="margin-bottom:12px">Past Sessions — ${exercise}${assisted?' <span style="color:var(--accent)">· assisted</span>':''}</div><div class="section-gap">${shown.map((session,idx)=>{ const best=bestSet(session.sets,assisted); const isPR=best.weight===overallBest.weight&&best.reps===overallBest.reps; return `<div style="background:var(--surface);border:1px solid ${idx===0?'var(--accent)':'var(--border)'};border-radius:var(--radius-sm);padding:10px 14px"><div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px"><div style="font-size:12px;font-weight:700;color:${idx===0?'var(--accent)':'var(--text-muted)'}">${idx===0?'Most Recent — ':''}${fmtDate(session.date)}</div>${isPR?`<div style="font-size:10px;font-weight:800;background:var(--amber-dim);color:var(--amber);border:1px solid var(--amber);border-radius:20px;padding:2px 7px">🏆 PR</div>`:''}</div><div style="font-size:13px;color:var(--text-muted);line-height:1.8">${session.sets.map(s=>`<span style="color:var(--text);font-weight:700">${fmtLift(s.weight)}</span> × ${s.reps}`).join(' &nbsp;·&nbsp; ')}</div><div style="font-size:11px;color:var(--text-muted);margin-top:4px">Best: ${fmtLift(best.weight)} × ${best.reps} &nbsp;·&nbsp; ${session.sets.length} set${session.sets.length!==1?'s':''}</div></div>`; }).join('')}</div></div>`;
+  return `<div style="margin-top:8px;border-top:2px dashed var(--border);padding-top:16px"><div class="card-title" style="margin-bottom:12px">Past Sessions — ${exercise}${assisted?' <span style="color:var(--accent)">· assisted</span>':''}</div><div class="section-gap">${shown.map((session,idx)=>{ const best=bestSet(session.sets,assisted); const isPR=best.weight===overallBest.weight&&best.reps===overallBest.reps; return `<div style="background:var(--surface);border:1px solid ${idx===0?'var(--accent)':'var(--border)'};border-radius:var(--radius-sm);padding:10px 14px"><div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px"><div style="font-size:12px;font-weight:700;color:${idx===0?'var(--accent)':'var(--text-muted)'}">${idx===0?'Most Recent — ':''}${fmtDate(session.date)}</div>${isPR?`<div style="font-size:10px;font-weight:800;background:var(--amber-dim);color:var(--amber);border:1px solid var(--amber);border-radius:20px;padding:2px 7px">🏆 PR</div>`:''}</div><div style="font-size:13px;color:var(--text-muted);line-height:1.8">${session.sets.map(s=>`<span style="color:var(--text);font-weight:700">${fmtLift(s.weight)}</span> × ${s.reps}${effMark(s)}`).join(' &nbsp;·&nbsp; ')}</div><div style="font-size:11px;color:var(--text-muted);margin-top:4px">Best: ${fmtLift(best.weight)} × ${best.reps} &nbsp;·&nbsp; ${session.sets.length} set${session.sets.length!==1?'s':''}</div></div>`; }).join('')}</div></div>`;
 }
 
 // ── CARDIO SCREENS ────────────────────────────────────────────────────────────
@@ -1425,7 +1437,7 @@ function renderHistory(){
               const parts=[ex.duration?fmtDuration(ex.duration):null,ex.distance?`${ex.distance} ${ex.distUnit}`:'',ex.heartRate?`♥ ${ex.heartRate} bpm`:''].filter(Boolean);
               return `<div class="history-exercise">Cardio — ${ex.name}</div><div class="history-sets">${parts.join(' · ')||'No details'}</div>`;
             }
-            return `<div class="history-exercise">${ex.muscle} — ${ex.name}</div><div class="history-sets">${ex.sets.map(set=>`${set.type==='warmup'?'WU':'●'} ${fmtLift(set.weight)} × ${set.reps}`).join('  ')}</div>`;
+            return `<div class="history-exercise">${ex.muscle} — ${ex.name}</div><div class="history-sets">${ex.sets.map(set=>`${set.type==='warmup'?'WU':'●'} ${fmtLift(set.weight)} × ${set.reps}${effMark(set)}`).join('  ')}</div>`;
           }).join('')}
         </div>`).join('')}
     `:state.historyTab==='records'?`
@@ -1865,6 +1877,7 @@ function attachEvents(){
   el('fav-filter',()=>{ state.favFilter=!state.favFilter; render(); });
 
   document.querySelectorAll('[data-toggle]').forEach(b=>b.addEventListener('click',()=>{ state.setType=b.dataset.toggle; render(); }));
+  document.querySelectorAll('[data-effort]').forEach(b=>b.addEventListener('click',()=>{ state.effort=b.dataset.effort; render(); }));
   document.querySelectorAll('[data-wunit]').forEach(b=>b.addEventListener('click',()=>{ state.weightUnit=b.dataset.wunit; localStorage.setItem('li_weight_unit',state.weightUnit); render(); }));
   document.querySelectorAll('[data-lunit]').forEach(b=>b.addEventListener('click',()=>{
     const u=b.dataset.lunit; if(u===state.liftUnit) return;
@@ -1879,7 +1892,12 @@ function attachEvents(){
   el('timer-cancel',()=>{ timerStop(false); updateTimerDOM(); });
 
   el('log-set',()=>{
-    state.pendingSets.push({type:state.setType,weight:liftToLbs(state.weight),reps:state.reps}); toast(`Set logged: ${state.weight} ${liftUnitLabel()} × ${state.reps}`); render();
+    const set={type:state.setType,weight:liftToLbs(state.weight),reps:state.reps};
+    // Effort applies to working sets only; 'std' is implicit (absent), so sets
+    // logged before v2.32.0 and effort-stamped ones share one shape.
+    if(state.setType==='working'&&state.effort!=='std') set.effort=state.effort;
+    state.pendingSets.push(set);
+    toast(`Set logged: ${state.weight} ${liftUnitLabel()} × ${state.reps}${set.effort==='f'?' · to failure':set.effort==='nf'?' · near failure':''}`); render();
   });
   document.querySelectorAll('[data-del]').forEach(b=>b.addEventListener('click',()=>{ state.pendingSets.splice(parseInt(b.dataset.del),1); render(); }));
 
@@ -2508,7 +2526,7 @@ function showPRModal(exercise){
             ${[...history].reverse().map(h=>`
               <div style="background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:10px 14px">
                 <div style="font-size:12px;color:var(--text-muted);margin-bottom:4px">${fmtDate(h.date)}</div>
-                <div style="font-size:13px;color:var(--text-muted)">${h.sets.map(s=>`<span style="color:var(--text);font-weight:700">${fmtLift(s.weight)}</span> × ${s.reps}`).join(' · ')}</div>
+                <div style="font-size:13px;color:var(--text-muted)">${h.sets.map(s=>`<span style="color:var(--text);font-weight:700">${fmtLift(s.weight)}</span> × ${s.reps}${effMark(s)}`).join(' · ')}</div>
               </div>`).join('')}
             ${history.length===0?'<div class="empty">No working sets logged yet</div>':''}
           </div>
