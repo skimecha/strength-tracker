@@ -405,7 +405,7 @@ async function deleteTicket(id){
   await loadSupportTickets(true); toast('Ticket deleted'); render();
 }
 
-const APP_VERSION = '2.32.0';
+const APP_VERSION = '2.32.1';
 const OWNER_UID     = '031a65ed-f52d-4a67-b271-47778e920c22';
 // Invite code from the URL (?invite=CODE) — drives the invite-only signup flow.
 let pendingInvite = new URLSearchParams(location.search).get('invite');
@@ -2116,12 +2116,24 @@ function resumeSession(sessionId){
 }
 
 // ─── EXPORT ───────────────────────────────────────────────────────────────────
-function exportAllCSV(){
+function exportAllCSV(){ try{
   const date=new Date().toISOString().slice(0,10);
   const rows=[]; const blank=['','','','','','',''];
   rows.push(['WORKOUTS','','','','','','']);
-  rows.push(['Date','Muscle Group','Exercise','Set Type','Set #','Weight (lbs)','Reps']);
-  state.sessions.forEach(s=>{ const d=new Date(s.date).toLocaleDateString('en-US'); s.exercises.forEach(ex=>{ let wu=0,wk=0; ex.sets.forEach(set=>{ if(set.type==='warmup') wu++; else wk++; rows.push([d,ex.muscle,ex.name,set.type,set.type==='warmup'?wu:wk,set.weight,set.reps]); }); }); });
+  rows.push(['Date','Muscle Group','Exercise','Set Type','Set #','Weight (lbs)','Reps','Effort']);
+  const cardio=[];
+  state.sessions.forEach(s=>{ const d=new Date(s.date).toLocaleDateString('en-US'); s.exercises.forEach(ex=>{
+    // Cardio entries have no sets array — collect for their own section below.
+    if(ex.type==='cardio'){ cardio.push([d,ex.name,ex.duration?fmtDuration(ex.duration):'',ex.distance||'',ex.distance?ex.distUnit:'',ex.heartRate||'','']); return; }
+    if(!Array.isArray(ex.sets)) return;
+    let wu=0,wk=0; ex.sets.forEach(set=>{ if(set.type==='warmup') wu++; else wk++; rows.push([d,ex.muscle,ex.name,set.type,set.type==='warmup'?wu:wk,set.weight,set.reps,set.effort==='f'?'Failure':set.effort==='nf'?'Near Failure':'']); });
+  }); });
+  if(cardio.length){
+    rows.push(blank);
+    rows.push(['CARDIO','','','','','','']);
+    rows.push(['Date','Activity','Duration','Distance','Unit','Heart Rate (bpm)','']);
+    cardio.forEach(r=>rows.push(r));
+  }
   rows.push(blank);
   rows.push(['PERSONAL RECORDS','','','','','','']);
   rows.push(['Exercise','Weight (lbs)','Reps','Date','','','']);
@@ -2142,7 +2154,7 @@ function exportAllCSV(){
   const csv=rows.map(r=>r.map(v=>`"${String(v).replace(/"/g,'""')}"`).join(',')).join('\n');
   const a=document.createElement('a'); a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv'})); a.download=`lockin-export-${date}.csv`; a.click();
   toast('Exported! 📥');
-}
+}catch(e){ toast('Export failed: '+((e&&e.message)||e),'var(--red)'); } }
 
 // ─── MODALS ───────────────────────────────────────────────────────────────────
 function showGoalsModal(){
