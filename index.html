@@ -406,7 +406,7 @@ async function deleteTicket(id){
   await loadSupportTickets(true); toast('Ticket deleted'); render();
 }
 
-const APP_VERSION = '2.34.0';
+const APP_VERSION = '2.35.0';
 const OWNER_UID     = '031a65ed-f52d-4a67-b271-47778e920c22';
 // Invite code from the URL (?invite=CODE) — drives the invite-only signup flow.
 let pendingInvite = new URLSearchParams(location.search).get('invite');
@@ -730,6 +730,9 @@ async function dbDeleteSession(id){
 async function dbSavePR(exercise,pr){
   await sb.from('personal_records').upsert({user_id:currentUser.id,exercise,weight:pr.weight,reps:pr.reps,date:pr.date},{onConflict:'user_id,exercise'});
 }
+async function dbDeletePR(exercise){
+  await sb.from('personal_records').delete().eq('user_id',currentUser.id).eq('exercise',exercise);
+}
 async function dbAddFood(entry){
   const {data}=await sb.from('food_log').upsert({id:entry.id,user_id:currentUser.id,date:entry.date,ts:entry.ts,name:entry.name,calories:entry.calories,protein:entry.protein,carbs:entry.carbs,fat:entry.fat}).select().single();
   return data;
@@ -864,7 +867,9 @@ function betterPR(cand, cur, assisted){
     ? (cand.weight<cur.weight||(cand.weight===cur.weight&&cand.reps>cur.reps))
     : (cand.weight>cur.weight||(cand.weight===cur.weight&&cand.reps>cur.reps));
 }
-// Recompute an exercise's PR from all logged working sets (used when its assisted flag flips).
+// Recompute an exercise's PR from all logged working sets (used when its
+// assisted flag flips, or when history is edited). No sets left anywhere →
+// the PR is removed entirely.
 function recomputePR(name){
   const assisted=isAssisted(name); let best=null;
   state.sessions.forEach(s=>s.exercises.forEach(ex=>{
@@ -875,6 +880,7 @@ function recomputePR(name){
     if(betterPR(b,best,assisted)) best={weight:b.weight,reps:b.reps,date:s.date};
   }));
   if(best){ state.prs[name]=best; dbSavePR(name,best); }
+  else if(state.prs[name]){ delete state.prs[name]; dbDeletePR(name); }
 }
 function setAssisted(name, assisted){
   state.exerciseSettings[name]={assisted:!!assisted};
@@ -1629,12 +1635,13 @@ function renderHistory(){
               <button class="btn btn-danger btn-xs del-session-btn" data-del-session="${s.id}">✕</button>
             </div>
           </div>
-          ${s.exercises.map(ex=>{
+          ${s.exercises.map((ex,exi)=>{
+            const editBtn=`<button class="btn btn-outline btn-xs" data-edit-ex="${s.id}|${exi}" title="Edit this exercise" ${resuming?'disabled style="opacity:.4;cursor:not-allowed;flex-shrink:0;margin-top:2px"':'style="flex-shrink:0;margin-top:2px"'}>✎</button>`;
             if(ex.type==='cardio'){
               const parts=[ex.duration?fmtDuration(ex.duration):null,ex.distance?`${ex.distance} ${ex.distUnit}`:'',ex.heartRate?`♥ ${ex.heartRate} bpm`:''].filter(Boolean);
-              return `<div class="history-exercise">Cardio — ${ex.name}</div><div class="history-sets">${parts.join(' · ')||'No details'}</div>`;
+              return `<div style="display:flex;align-items:flex-start;gap:8px"><div style="flex:1;min-width:0"><div class="history-exercise">Cardio — ${ex.name}</div><div class="history-sets">${parts.join(' · ')||'No details'}</div></div>${editBtn}</div>`;
             }
-            return `<div class="history-exercise">${ex.muscle} — ${ex.name}</div><div class="history-sets">${ex.sets.map(set=>`${set.type==='warmup'?'WU':'●'} ${fmtLift(set.weight)} × ${set.reps}${effMark(set)}`).join('  ')}</div>`;
+            return `<div style="display:flex;align-items:flex-start;gap:8px"><div style="flex:1;min-width:0"><div class="history-exercise">${ex.muscle} — ${ex.name}</div><div class="history-sets">${ex.sets.map(set=>`${set.type==='warmup'?'WU':'●'} ${fmtLift(set.weight)} × ${set.reps}${effMark(set)}`).join('  ')}</div></div>${editBtn}</div>`;
           }).join('')}
         </div>`).join('')}
     `:state.historyTab==='records'?`
@@ -2155,6 +2162,7 @@ function attachEvents(){
 
   document.querySelectorAll('.resume-btn').forEach(b=>b.addEventListener('click',()=>{ if(!b.disabled) resumeSession(b.dataset.resume); }));
   document.querySelectorAll('.del-session-btn').forEach(b=>b.addEventListener('click',()=>{ if(confirm('Delete this workout session?')){ state.sessions=state.sessions.filter(s=>s.id!==b.dataset.delSession); dbDeleteSession(b.dataset.delSession); render(); } }));
+  document.querySelectorAll('[data-edit-ex]').forEach(b=>b.addEventListener('click',()=>{ const [sid,i]=b.dataset.editEx.split('|'); showEditExerciseModal(sid,parseInt(i)); }));
 
   document.querySelectorAll('[data-nutview]').forEach(b=>b.addEventListener('click',()=>{ state.nutritionView=b.dataset.nutview; render(); }));
   document.querySelectorAll('[data-nutperiod]').forEach(b=>b.addEventListener('click',()=>{ state.nutritionPeriod=b.dataset.nutperiod; render(); }));
@@ -2395,6 +2403,73 @@ function exportAllCSV(){ try{
 }catch(e){ toast('Export failed: '+((e&&e.message)||e),'var(--red)'); } }
 
 // ─── MODALS ───────────────────────────────────────────────────────────────────
+// ── Edit a logged exercise (Plans → Workouts → ✎) ──────────────────────────
+// Works on a draft copy of the sets; nothing is written until Save. Weights
+// are edited in the current display unit and stored back as canonical lbs.
+let _exEdit=null;  // {sessionId, exIdx, name, cardio, sets:[...]}
+function showEditExerciseModal(sessionId,exIdx){
+  const s=state.sessions.find(x=>x.id===sessionId); if(!s) return;
+  const ex=s.exercises[exIdx]; if(!ex) return;
+  _exEdit={sessionId,exIdx,name:ex.name,cardio:ex.type==='cardio',sets:ex.type==='cardio'?[]:JSON.parse(JSON.stringify(ex.sets||[]))};
+  renderExEditModal();
+}
+function exEditSync(){
+  if(!_exEdit) return;
+  _exEdit.sets.forEach((st,i)=>{
+    const w=document.getElementById('ex-w-'+i), r=document.getElementById('ex-r-'+i);
+    // Only convert back when the field actually changed — a no-op save must not
+    // drift the canonical lbs value through a kg display round-trip.
+    if(w){ const v=parseFloat(w.value)||0; if(v!==lbsToLift(st.weight)) st.weight=liftToLbs(v); }
+    if(r) st.reps=Math.max(1,parseInt(r.value)||1);
+  });
+}
+function renderExEditModal(){
+  const d=_exEdit; let wk=0;
+  const rows=d.sets.map((st,i)=>{
+    const badge=st.type==='warmup'?'WU':'W'+(++wk);
+    const effCol=st.effort==='f'?'var(--red)':st.effort==='nf'?'var(--amber)':'var(--text-muted)';
+    return `<div style="display:flex;align-items:center;gap:6px">
+      <div class="set-badge ${st.type}" style="width:28px">${badge}</div>
+      <input type="number" id="ex-w-${i}" value="${lbsToLift(st.weight)}" step="0.5" inputmode="decimal" style="width:66px;padding:8px 4px;text-align:center;font-size:14px">
+      <span style="font-size:11px;color:var(--text-muted);flex-shrink:0">×</span>
+      <input type="number" id="ex-r-${i}" value="${st.reps}" inputmode="numeric" style="width:50px;padding:8px 4px;text-align:center;font-size:14px">
+      ${st.type==='working'?`<button class="btn btn-outline btn-xs" data-exd-eff="${i}" title="Effort: tap to cycle Standard → Near Failure → Failure" style="width:34px;color:${effCol};border-color:${st.effort?effCol:'var(--border)'}">${st.effort==='f'?'F':st.effort==='nf'?'NF':'—'}</button>`:`<div style="width:34px;flex-shrink:0"></div>`}
+      <button class="btn btn-outline btn-xs" data-exd-uni="${i}" title="One side (unilateral)" style="${st.uni?'color:var(--accent);border-color:var(--accent)':'color:var(--text-muted)'}">UNI</button>
+      <button class="btn btn-danger btn-xs" data-exd-del="${i}" aria-label="Delete set">✕</button>
+    </div>`;
+  }).join('');
+  document.getElementById('modal-root').innerHTML=`<div class="modal-overlay" id="modal-overlay"><div class="modal" style="max-height:88vh;overflow-y:auto">
+    <div class="modal-title">Edit — ${esc(_exEdit.name)}</div>
+    ${d.cardio?`<div style="font-size:13px;color:var(--text-muted);margin-bottom:12px">Cardio entries can be removed here; to change the details, remove and re-log it.</div>`:`<div class="section-gap">${rows||'<div class="empty" style="padding:6px 0">No sets left — Save will remove this exercise.</div>'}</div><div style="font-size:11px;color:var(--text-muted);margin-top:8px">Weights in ${liftUnitLabel()} · NF/F = effort · UNI = one side</div>`}
+    <button class="btn btn-danger btn-full" id="exd-remove" style="margin-top:12px">Remove Exercise from This Workout</button>
+    <div class="btn-grid" style="margin-top:10px"><button class="btn btn-outline" id="modal-cancel">Cancel</button>${d.cardio?'':'<button class="btn btn-primary" id="exd-save">Save</button>'}</div>
+  </div></div>`;
+  document.getElementById('modal-cancel').addEventListener('click',()=>{ _exEdit=null; closeModal(); });
+  document.getElementById('modal-overlay').addEventListener('click',e=>{ if(e.target===e.currentTarget){ _exEdit=null; closeModal(); } });
+  document.querySelectorAll('[data-exd-eff]').forEach(b=>b.addEventListener('click',()=>{ exEditSync(); const st=_exEdit.sets[parseInt(b.dataset.exdEff)]; st.effort=st.effort==='nf'?'f':st.effort==='f'?undefined:'nf'; if(!st.effort) delete st.effort; renderExEditModal(); }));
+  document.querySelectorAll('[data-exd-uni]').forEach(b=>b.addEventListener('click',()=>{ exEditSync(); const st=_exEdit.sets[parseInt(b.dataset.exdUni)]; if(st.uni) delete st.uni; else st.uni=true; renderExEditModal(); }));
+  document.querySelectorAll('[data-exd-del]').forEach(b=>b.addEventListener('click',()=>{ exEditSync(); _exEdit.sets.splice(parseInt(b.dataset.exdDel),1); renderExEditModal(); }));
+  document.getElementById('exd-remove').addEventListener('click',()=>{ if(!confirm(`Remove "${_exEdit.name}" from this workout?`)) return; exEditApply(true); });
+  const sv=document.getElementById('exd-save');
+  if(sv) sv.addEventListener('click',()=>{ exEditSync(); exEditApply(false); });
+}
+function exEditApply(removeAll){
+  const d=_exEdit; if(!d) return;
+  const s=state.sessions.find(x=>x.id===d.sessionId); if(!s){ _exEdit=null; closeModal(); return; }
+  const ex=s.exercises[d.exIdx];
+  const gone=removeAll||(!d.cardio&&!d.sets.length);
+  if(gone) s.exercises.splice(d.exIdx,1);
+  else ex.sets=d.sets;
+  if(!s.exercises.length){
+    // Last exercise removed → the whole session goes.
+    state.sessions=state.sessions.filter(x=>x.id!==s.id);
+    dbDeleteSession(s.id);
+  } else dbSaveSession(s);
+  if(!d.cardio) recomputePR(d.name);
+  _exEdit=null; closeModal(); render();
+  toast(gone?'Exercise removed':'Exercise updated');
+}
+
 function showGoalsModal(){
   const g=state.macroGoals;
   document.getElementById('modal-root').innerHTML=`<div class="modal-overlay" id="modal-overlay"><div class="modal"><div class="modal-title">Daily Macro Goals</div><div class="field"><label>Calories (kcal)</label><input type="number" id="g-cal" value="${g.calories}"></div><div class="field"><label>Protein (g)</label><input type="number" id="g-pro" value="${g.protein}"></div><div class="field"><label>Carbs (g)</label><input type="number" id="g-carb" value="${g.carbs}"></div><div class="field"><label>Fat (g)</label><input type="number" id="g-fat" value="${g.fat}"></div><div class="btn-grid"><button class="btn btn-outline" id="modal-cancel">Cancel</button><button class="btn btn-primary" id="modal-save-goals">Save</button></div></div></div>`;
