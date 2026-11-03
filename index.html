@@ -405,7 +405,7 @@ async function deleteTicket(id){
   await loadSupportTickets(true); toast('Ticket deleted'); render();
 }
 
-const APP_VERSION = '2.33.0';
+const APP_VERSION = '2.33.1';
 const OWNER_UID     = '031a65ed-f52d-4a67-b271-47778e920c22';
 // Invite code from the URL (?invite=CODE) — drives the invite-only signup flow.
 let pendingInvite = new URLSearchParams(location.search).get('invite');
@@ -1354,11 +1354,15 @@ function mpPlannedMeal(date,slot){
 // column migration (meal-prep-setup.sql) has been run.
 function mpLoggedEntry(dateKey,meal,slot){ return state.foodLog.find(e=>e.date===dateKey&&((e.meal&&e.meal.mealId===meal.id&&e.meal.slot===slot)||e.name===meal.name))||null; }
 function mpDaysStr(m){ return MP_DAY_ORDER.filter(d=>(m.days||[]).includes(d)).map(d=>MP_DAY_NAME[d]).join(' '); }
-function mpLogMeal(mealId,slot){
+function mpLogMeal(mealId,slot,dateKey){
   const m=state.mealPrep.meals.find(x=>x.id===mealId); if(!m) return;
   const t=mealTotals(m);
-  const entry={id:uid(),date:todayKey(),ts:Date.now(),name:m.name,calories:t.calories,protein:t.protein,carbs:t.carbs,fat:t.fat,meal:{mealId:m.id,slot}};
-  state.foodLog.push(entry); render(); toast(`${MP_SLOT_LABEL[slot]} logged · ${t.calories} kcal`);
+  const dk=dateKey||todayKey(); const isToday=dk===todayKey();
+  // Retro-logs (past days via the week grid) timestamp at noon of that day so
+  // they land inside the right date everywhere and sort sensibly.
+  const ts=isToday?Date.now():new Date(dk).setHours(12,0,0,0);
+  const entry={id:uid(),date:dk,ts,name:m.name,calories:t.calories,protein:t.protein,carbs:t.carbs,fat:t.fat,meal:{mealId:m.id,slot}};
+  state.foodLog.push(entry); render(); toast(`${MP_SLOT_LABEL[slot]} logged${isToday?'':' for '+dk} · ${t.calories} kcal`);
   // The meal tag column ships in meal-prep-setup.sql; until it exists this
   // update fails harmlessly and the name-match fallback covers check-off.
   dbAddFood(entry).then(()=>{ sb.from('food_log').update({meal:entry.meal}).eq('id',entry.id).then(null,()=>{}); });
@@ -1414,7 +1418,7 @@ function renderMealPrep(){
           </div>
         </div>`;
       }).join('')}
-      <div style="font-size:10px;color:var(--text-muted)">B L S D = breakfast lunch snack dinner · tap a cell to change that one day</div>
+      <div style="font-size:10px;color:var(--text-muted)">B L S D = breakfast lunch snack dinner · tap a cell to log a past day or change its plan</div>
     </div></div>`:''}
     <div class="card"><div class="card-title">Your Meals</div>${meals.length?`<div class="section-gap">${meals.map(m=>{const t=mealTotals(m);return `<div style="display:flex;align-items:center;gap:8px"><div style="flex:1;min-width:0"><div style="font-size:14px;font-weight:700">${esc(m.name)}</div><div style="font-size:11px;color:var(--text-muted)">${MP_SLOT_LABEL[m.slot]||m.slot} · ${mpDaysStr(m)||'no days'} · ${t.calories} kcal &nbsp;${pBadge(t.protein,t.calories)}</div></div><button class="btn btn-outline btn-xs" data-mp-edit="${m.id}" style="flex-shrink:0">Edit</button><button class="btn btn-danger btn-xs" data-mp-del="${m.id}" style="flex-shrink:0">✕</button></div>`;}).join('<hr class="divider" style="margin:2px 0">')}</div>`:`<div class="empty">No meals yet — build your first one below.</div>`}</div>
     <button class="btn btn-primary btn-full" id="mp-new">+ New Meal</button>`;
@@ -1472,9 +1476,23 @@ function showMpQuickAdd(){
 }
 function showMpOverridePicker(dateKey,slot){
   const meals=[...state.mealPrep.meals].sort((a,b)=>(a.slot===slot?0:1)-(b.slot===slot?0:1));
-  document.getElementById('modal-root').innerHTML=`<div class="modal-overlay" id="modal-overlay"><div class="modal" style="max-height:88vh;overflow-y:auto"><div class="modal-title">${MP_SLOT_LABEL[slot]} — ${dateKey}</div><div style="font-size:12px;color:var(--text-muted);margin-bottom:12px">Changes this one day only; the weekly plan stays as it is.</div><div class="section-gap">${meals.map(m=>{const t=mealTotals(m);return `<button class="btn btn-outline btn-full" data-mp-ovr="${m.id}" style="justify-content:space-between"><span>${esc(m.name)}</span><span style="color:var(--text-muted);font-size:12px">${t.calories} kcal</span></button>`;}).join('')}<button class="btn btn-outline btn-full" data-mp-ovr="none">No meal this day</button><button class="btn btn-outline btn-full" data-mp-ovr="auto">Follow weekly plan</button></div><button class="btn btn-outline btn-full" id="modal-cancel" style="margin-top:12px">Cancel</button></div></div>`;
+  // Today and past days are loggable from here (retro check-off); future days
+  // only take plan changes.
+  const day=new Date(dateKey); day.setHours(0,0,0,0);
+  const t0=new Date(); t0.setHours(0,0,0,0);
+  const loggable=day.getTime()<=t0.getTime();
+  const planned=mpPlannedMeal(new Date(dateKey),slot);
+  const logged=planned?mpLoggedEntry(dateKey,planned,slot):null;
+  document.getElementById('modal-root').innerHTML=`<div class="modal-overlay" id="modal-overlay"><div class="modal" style="max-height:88vh;overflow-y:auto"><div class="modal-title">${MP_SLOT_LABEL[slot]} — ${dateKey}</div>
+    ${logged?`<button class="btn btn-outline btn-full" id="mp-ovr-unlog" style="color:var(--green);margin-bottom:12px">✓ Logged ${fmtTime(logged.ts)} — tap to un-log</button>`:''}
+    ${!logged&&loggable&&planned?`<button class="btn btn-green btn-full" id="mp-ovr-log" style="margin-bottom:12px">Log "${esc(planned.name)}" for this day</button>`:''}
+    <div style="font-size:12px;color:var(--text-muted);margin-bottom:12px">Change the plan for this one day; the weekly template stays as it is.</div><div class="section-gap">${meals.map(m=>{const t=mealTotals(m);return `<button class="btn btn-outline btn-full" data-mp-ovr="${m.id}" style="justify-content:space-between"><span>${esc(m.name)}</span><span style="color:var(--text-muted);font-size:12px">${t.calories} kcal</span></button>`;}).join('')}<button class="btn btn-outline btn-full" data-mp-ovr="none">No meal this day</button><button class="btn btn-outline btn-full" data-mp-ovr="auto">Follow weekly plan</button></div><button class="btn btn-outline btn-full" id="modal-cancel" style="margin-top:12px">Cancel</button></div></div>`;
   document.getElementById('modal-cancel').addEventListener('click',closeModal);
   document.getElementById('modal-overlay').addEventListener('click',e=>{ if(e.target===e.currentTarget) closeModal(); });
+  const lg=document.getElementById('mp-ovr-log');
+  if(lg) lg.addEventListener('click',()=>{ closeModal(); mpLogMeal(planned.id,slot,dateKey); });
+  const ul=document.getElementById('mp-ovr-unlog');
+  if(ul) ul.addEventListener('click',()=>{ if(!confirm('Un-log this meal? Its entry is removed from that day\'s food log.')) return; state.foodLog=state.foodLog.filter(e=>e.id!==logged.id); closeModal(); render(); toast('Meal un-logged'); dbDeleteFood(logged.id); });
   document.querySelectorAll('[data-mp-ovr]').forEach(b=>b.addEventListener('click',()=>{
     const v=b.dataset.mpOvr;
     const ov=state.mealPrep.overrides;
