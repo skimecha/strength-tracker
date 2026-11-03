@@ -154,6 +154,7 @@ select:focus,input:focus{outline:none;border-color:var(--accent)}
 .eff-tag{font-size:10px;font-weight:800;border-radius:20px;padding:2px 7px;flex-shrink:0;border:1px solid}
 .eff-tag.nf{color:var(--amber);background:var(--amber-dim);border-color:var(--amber)}
 .eff-tag.f{color:var(--red);background:var(--red-dim);border-color:var(--red)}
+.eff-tag.uni{color:var(--accent);background:var(--accent-dim);border-color:var(--accent)}
 .set-info{flex:1;font-size:15px;font-weight:600;color:var(--text)}
 .set-del{background:none;border:none;color:var(--red);font-size:18px;cursor:pointer;padding:4px 6px}
 .history-session{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:14px}
@@ -405,7 +406,7 @@ async function deleteTicket(id){
   await loadSupportTickets(true); toast('Ticket deleted'); render();
 }
 
-const APP_VERSION = '2.33.1';
+const APP_VERSION = '2.34.0';
 const OWNER_UID     = '031a65ed-f52d-4a67-b271-47778e920c22';
 // Invite code from the URL (?invite=CODE) — drives the invite-only signup flow.
 let pendingInvite = new URLSearchParams(location.search).get('invite');
@@ -481,7 +482,7 @@ let currentUser = null;
 let state = {
   view:'log',logStep:'workout',
   selectedMuscle:null,selectedExercise:null,selectedGroup:null,
-  setType:'working',effort:'std',weight:45,reps:10,weightInc:5,repsInc:1,
+  setType:'working',effort:'std',loadMode:'bi',weight:45,reps:10,weightInc:5,repsInc:1,
   pendingSets:[],_currentSession:null,_resumedSnapshot:null,
   split:null,splitIdx:0,splitPicking:false,
   sessions:[],prs:{},favorites:[],customExercises:[],exerciseSettings:{},
@@ -947,7 +948,7 @@ function persistDraft(){
       localStorage.setItem(DRAFT_KEY, JSON.stringify({
         v:1, cur:state._currentSession, snap:state._resumedSnapshot, pending:state.pendingSets,
         group:state.selectedGroup, muscle:state.selectedMuscle, exercise:state.selectedExercise,
-        logStep:state.logStep, setType:state.setType, effort:state.effort,
+        logStep:state.logStep, setType:state.setType, effort:state.effort, loadMode:state.loadMode,
         split:state.split, splitIdx:state.splitIdx,
       }));
     } else localStorage.removeItem(DRAFT_KEY);
@@ -968,6 +969,7 @@ function restoreDraft(){
   if(d.logStep) state.logStep=d.logStep;
   if(d.setType) state.setType=d.setType;
   if(d.effort) state.effort=d.effort;
+  if(d.loadMode) state.loadMode=d.loadMode;
   // A resumed session is still in the DB, so loadUserData reloaded it — drop that
   // copy from history so it isn't shown twice (it's the active workout now).
   if(state._currentSession) state.sessions=state.sessions.filter(s=>s.id!==state._currentSession.id);
@@ -1123,6 +1125,9 @@ function renderSets(){
       ${state.setType==='working'?`<div style="margin-top:14px"><label>Effort</label>
       <div class="toggle-group"><div class="toggle-opt ${state.effort==='std'?'active':''}" data-effort="std" style="font-size:13px">Standard</div><div class="toggle-opt ${state.effort==='nf'?'active':''}" data-effort="nf" style="font-size:13px">Near Failure</div><div class="toggle-opt ${state.effort==='f'?'active':''}" data-effort="f" style="font-size:13px">Failure</div></div>
       <div style="font-size:11px;color:var(--text-muted);margin-top:6px">Near failure = 2–3 reps in reserve · Failure = nothing left</div></div>`:''}
+      <div style="margin-top:14px"><label>Loading</label>
+      <div class="toggle-group"><div class="toggle-opt ${state.loadMode!=='uni'?'active':''}" data-loadmode="bi" style="font-size:13px">Both Sides</div><div class="toggle-opt ${state.loadMode==='uni'?'active':''}" data-loadmode="uni" style="font-size:13px">One Side</div></div>
+      <div style="font-size:11px;color:var(--text-muted);margin-top:6px">One side = each arm/leg moved the full weight on its own (e.g. single-arm pulldown)</div></div>
     </div>
     ${state.pendingSets.length?`<div class="card"><div class="card-title">Logged Sets</div><div class="section-gap">${state.pendingSets.map((s,i)=>`<div class="set-row"><div class="set-badge ${s.type}">${s.type==='warmup'?'WU':'W'+workingIdx(i)}</div><div class="set-info">${fmtLift(s.weight)} × ${s.reps} reps</div>${effTag(s)}<button class="set-del" data-del="${i}">✕</button></div>`).join('')}</div></div>`:''}
     <button class="btn btn-primary btn-full" id="log-set">+ Log Set</button>
@@ -1138,8 +1143,10 @@ function workingIdx(i){ let n=0; for(let j=0;j<=i;j++){ if(state.pendingSets[j].
 
 // Effort badges (proximity to failure). Sets without .effort are 'standard' —
 // every set logged before v2.32.0 — and render unchanged.
-function effTag(s){ return s.effort==='f'?'<span class="eff-tag f">F</span>':s.effort==='nf'?'<span class="eff-tag nf">NF</span>':''; }
-function effMark(s){ return s.effort==='f'?' <span style="color:var(--red);font-weight:800;font-size:10px">F</span>':s.effort==='nf'?' <span style="color:var(--amber);font-weight:800;font-size:10px">NF</span>':''; }
+// Both return the effort mark plus the unilateral mark, so every place that
+// renders sets picks both up through one call.
+function effTag(s){ return (s.effort==='f'?'<span class="eff-tag f">F</span>':s.effort==='nf'?'<span class="eff-tag nf">NF</span>':'')+(s.uni?'<span class="eff-tag uni" title="One side — each arm/leg moved the full weight">UNI</span>':''); }
+function effMark(s){ return (s.effort==='f'?' <span style="color:var(--red);font-weight:800;font-size:10px">F</span>':s.effort==='nf'?' <span style="color:var(--amber);font-weight:800;font-size:10px">NF</span>':'')+(s.uni?' <span style="color:var(--accent);font-weight:800;font-size:10px" title="One side">UNI</span>':''); }
 
 function renderExerciseHistory(exercise){
   const past=[];
@@ -2068,6 +2075,7 @@ function attachEvents(){
 
   document.querySelectorAll('[data-toggle]').forEach(b=>b.addEventListener('click',()=>{ state.setType=b.dataset.toggle; render(); }));
   document.querySelectorAll('[data-effort]').forEach(b=>b.addEventListener('click',()=>{ state.effort=b.dataset.effort; render(); }));
+  document.querySelectorAll('[data-loadmode]').forEach(b=>b.addEventListener('click',()=>{ state.loadMode=b.dataset.loadmode; render(); }));
   document.querySelectorAll('[data-wunit]').forEach(b=>b.addEventListener('click',()=>{ state.weightUnit=b.dataset.wunit; localStorage.setItem('li_weight_unit',state.weightUnit); render(); }));
   document.querySelectorAll('[data-lunit]').forEach(b=>b.addEventListener('click',()=>{
     const u=b.dataset.lunit; if(u===state.liftUnit) return;
@@ -2086,8 +2094,9 @@ function attachEvents(){
     // Effort applies to working sets only; 'std' is implicit (absent), so sets
     // logged before v2.32.0 and effort-stamped ones share one shape.
     if(state.setType==='working'&&state.effort!=='std') set.effort=state.effort;
+    if(state.loadMode==='uni') set.uni=true;  // absent = bilateral, like pre-v2.34.0 sets
     state.pendingSets.push(set);
-    toast(`Set logged: ${state.weight} ${liftUnitLabel()} × ${state.reps}${set.effort==='f'?' · to failure':set.effort==='nf'?' · near failure':''}`); render();
+    toast(`Set logged: ${state.weight} ${liftUnitLabel()} × ${state.reps}${set.effort==='f'?' · to failure':set.effort==='nf'?' · near failure':''}${set.uni?' · one side':''}`); render();
   });
   document.querySelectorAll('[data-del]').forEach(b=>b.addEventListener('click',()=>{ state.pendingSets.splice(parseInt(b.dataset.del),1); render(); }));
 
@@ -2348,13 +2357,13 @@ function exportAllCSV(){ try{
   const date=new Date().toISOString().slice(0,10);
   const rows=[]; const blank=['','','','','','',''];
   rows.push(['WORKOUTS','','','','','','']);
-  rows.push(['Date','Muscle Group','Exercise','Set Type','Set #','Weight (lbs)','Reps','Effort']);
+  rows.push(['Date','Muscle Group','Exercise','Set Type','Set #','Weight (lbs)','Reps','Effort','Loading']);
   const cardio=[];
   state.sessions.forEach(s=>{ const d=new Date(s.date).toLocaleDateString('en-US'); s.exercises.forEach(ex=>{
     // Cardio entries have no sets array — collect for their own section below.
     if(ex.type==='cardio'){ cardio.push([d,ex.name,ex.duration?fmtDuration(ex.duration):'',ex.distance||'',ex.distance?ex.distUnit:'',ex.heartRate||'','']); return; }
     if(!Array.isArray(ex.sets)) return;
-    let wu=0,wk=0; ex.sets.forEach(set=>{ if(set.type==='warmup') wu++; else wk++; rows.push([d,ex.muscle,ex.name,set.type,set.type==='warmup'?wu:wk,set.weight,set.reps,set.effort==='f'?'Failure':set.effort==='nf'?'Near Failure':'']); });
+    let wu=0,wk=0; ex.sets.forEach(set=>{ if(set.type==='warmup') wu++; else wk++; rows.push([d,ex.muscle,ex.name,set.type,set.type==='warmup'?wu:wk,set.weight,set.reps,set.effort==='f'?'Failure':set.effort==='nf'?'Near Failure':'',set.uni?'Unilateral':'']); });
   }); });
   if(cardio.length){
     rows.push(blank);
