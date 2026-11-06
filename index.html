@@ -406,7 +406,7 @@ async function deleteTicket(id){
   await loadSupportTickets(true); toast('Ticket deleted'); render();
 }
 
-const APP_VERSION = '2.35.0';
+const APP_VERSION = '2.36.0';
 const OWNER_UID     = '031a65ed-f52d-4a67-b271-47778e920c22';
 // Invite code from the URL (?invite=CODE) — drives the invite-only signup flow.
 let pendingInvite = new URLSearchParams(location.search).get('invite');
@@ -482,7 +482,7 @@ let currentUser = null;
 let state = {
   view:'log',logStep:'workout',
   selectedMuscle:null,selectedExercise:null,selectedGroup:null,
-  setType:'working',effort:'std',loadMode:'bi',weight:45,reps:10,weightInc:5,repsInc:1,
+  setType:'working',effort:'std',loadMode:'bi',machine:1,weight:45,reps:10,weightInc:5,repsInc:1,
   pendingSets:[],_currentSession:null,_resumedSnapshot:null,
   split:null,splitIdx:0,splitPicking:false,
   sessions:[],prs:{},favorites:[],customExercises:[],exerciseSettings:{},
@@ -873,7 +873,7 @@ function betterPR(cand, cur, assisted){
 function recomputePR(name){
   const assisted=isAssisted(name); let best=null;
   state.sessions.forEach(s=>s.exercises.forEach(ex=>{
-    if(ex.type==='cardio'||ex.name!==name) return;
+    if(ex.type==='cardio'||ex.name!==name||(ex.machine||1)!==1) return;  // records = primary machine only
     const working=(ex.sets||[]).filter(x=>x.type==='working');
     if(!working.length) return;
     const b=bestSet(working,assisted);
@@ -954,7 +954,7 @@ function persistDraft(){
       localStorage.setItem(DRAFT_KEY, JSON.stringify({
         v:1, cur:state._currentSession, snap:state._resumedSnapshot, pending:state.pendingSets,
         group:state.selectedGroup, muscle:state.selectedMuscle, exercise:state.selectedExercise,
-        logStep:state.logStep, setType:state.setType, effort:state.effort, loadMode:state.loadMode,
+        logStep:state.logStep, setType:state.setType, effort:state.effort, loadMode:state.loadMode, machine:state.machine,
         split:state.split, splitIdx:state.splitIdx,
       }));
     } else localStorage.removeItem(DRAFT_KEY);
@@ -976,6 +976,7 @@ function restoreDraft(){
   if(d.setType) state.setType=d.setType;
   if(d.effort) state.effort=d.effort;
   if(d.loadMode) state.loadMode=d.loadMode;
+  if(d.machine) state.machine=d.machine;
   // A resumed session is still in the DB, so loadUserData reloaded it — drop that
   // copy from history so it isn't shown twice (it's the active workout now).
   if(state._currentSession) state.sessions=state.sessions.filter(s=>s.id!==state._currentSession.id);
@@ -1113,7 +1114,10 @@ function renderSets(){
   return `
     <div style="display:flex;align-items:center;gap:10px"><button class="btn btn-outline btn-sm" id="back-exercise">← Back</button><div style="min-width:0"><div class="page-title" style="font-size:17px">${state.selectedExercise}</div><div class="subtitle">${state.selectedMuscle}</div></div><button class="btn btn-outline btn-sm" id="split-set-btn" style="margin-left:auto;flex-shrink:0" title="Log another exercise alongside this one">⑂ Super Set</button></div>
     ${state.split&&state.split.length?`<div style="display:flex;flex-wrap:wrap;gap:6px;flex-shrink:0">${state.split.map((en,i)=>{ const n=i===state.splitIdx?state.pendingSets.length:(en.sets||[]).length; return `<button class="period-btn ${i===state.splitIdx?'active':''}" data-splitchip="${i}">${esc(shortName(en.name))}${n?` · ${n}`:''}</button>`; }).join('')}</div>`:''}
-    <div class="card"><div class="card-title">Set Type</div><div class="toggle-group"><div class="toggle-opt ${state.setType==='warmup'?'active':''}" data-toggle="warmup">Warmup</div><div class="toggle-opt ${state.setType==='working'?'active':''}" data-toggle="working">Working</div></div></div>
+    <div class="card"><div class="card-title">Set Type</div><div class="toggle-group"><div class="toggle-opt ${state.setType==='warmup'?'active':''}" data-toggle="warmup">Warmup</div><div class="toggle-opt ${state.setType==='working'?'active':''}" data-toggle="working">Working</div></div>
+      <div style="display:flex;align-items:center;gap:10px;margin-top:10px"><label style="margin:0;flex-shrink:0">Machine</label><div class="toggle-group" style="flex:1"><div class="toggle-opt ${state.machine===1?'active':''}" data-machine="1" style="padding:6px 0;font-size:13px">1</div><div class="toggle-opt ${state.machine===2?'active':''}" data-machine="2" style="padding:6px 0;font-size:13px">2</div><div class="toggle-opt ${state.machine===3?'active':''}" data-machine="3" style="padding:6px 0;font-size:13px">3</div></div></div>
+      ${state.machine>1?`<div style="font-size:11px;color:var(--text-muted);margin-top:6px">Machine ${state.machine} sets are logged and tagged M${state.machine} — Records track Machine 1 (primary) only</div>`:''}
+    </div>
     <div class="card">
       <div class="card-title">${state.setType==='warmup'?'Warmup':'Working'} Set ${setNum}</div>
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:5px">
@@ -1156,13 +1160,14 @@ function effMark(s){ return (s.effort==='f'?' <span style="color:var(--red);font
 
 function renderExerciseHistory(exercise){
   const past=[];
-  state.sessions.forEach(s=>{ s.exercises.forEach(ex=>{ if(ex.type==='cardio') return; if(ex.name===exercise){ const working=ex.sets.filter(s=>s.type==='working'); if(working.length) past.push({date:s.date,sets:working}); } }); });
+  state.sessions.forEach(s=>{ s.exercises.forEach(ex=>{ if(ex.type==='cardio') return; if(ex.name===exercise){ const working=ex.sets.filter(s=>s.type==='working'); if(working.length) past.push({date:s.date,sets:working,machine:ex.machine||1}); } }); });
   if(!past.length) return '';
   past.sort((a,b)=>b.date-a.date);
   const shown=past.slice(0,8);
   const assisted=isAssisted(exercise);
-  let overallBest=null; past.forEach(session=>{ const s=bestSet(session.sets,assisted); if(betterPR(s,overallBest,assisted)) overallBest=s; });
-  return `<div style="margin-top:8px;border-top:2px dashed var(--border);padding-top:16px"><div class="card-title" style="margin-bottom:12px">Past Sessions — ${exercise}${assisted?' <span style="color:var(--accent)">· assisted</span>':''}</div><div class="section-gap">${shown.map((session,idx)=>{ const best=bestSet(session.sets,assisted); const isPR=best.weight===overallBest.weight&&best.reps===overallBest.reps; return `<div style="background:var(--surface);border:1px solid ${idx===0?'var(--accent)':'var(--border)'};border-radius:var(--radius-sm);padding:10px 14px"><div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px"><div style="font-size:12px;font-weight:700;color:${idx===0?'var(--accent)':'var(--text-muted)'}">${idx===0?'Most Recent — ':''}${fmtDate(session.date)}</div>${isPR?`<div style="font-size:10px;font-weight:800;background:var(--amber-dim);color:var(--amber);border:1px solid var(--amber);border-radius:20px;padding:2px 7px">🏆 PR</div>`:''}</div><div style="font-size:13px;color:var(--text-muted);line-height:1.8">${session.sets.map(s=>`<span style="color:var(--text);font-weight:700">${fmtLift(s.weight)}</span> × ${s.reps}${effMark(s)}`).join(' &nbsp;·&nbsp; ')}</div><div style="font-size:11px;color:var(--text-muted);margin-top:4px">Best: ${fmtLift(best.weight)} × ${best.reps} &nbsp;·&nbsp; ${session.sets.length} set${session.sets.length!==1?'s':''}</div></div>`; }).join('')}</div></div>`;
+  // The PR crown considers primary-machine sessions only (M2/M3 are tagged context).
+  let overallBest=null; past.forEach(session=>{ if(session.machine!==1) return; const s=bestSet(session.sets,assisted); if(betterPR(s,overallBest,assisted)) overallBest=s; });
+  return `<div style="margin-top:8px;border-top:2px dashed var(--border);padding-top:16px"><div class="card-title" style="margin-bottom:12px">Past Sessions — ${exercise}${assisted?' <span style="color:var(--accent)">· assisted</span>':''}</div><div class="section-gap">${shown.map((session,idx)=>{ const best=bestSet(session.sets,assisted); const isPR=session.machine===1&&overallBest&&best.weight===overallBest.weight&&best.reps===overallBest.reps; return `<div style="background:var(--surface);border:1px solid ${idx===0?'var(--accent)':'var(--border)'};border-radius:var(--radius-sm);padding:10px 14px"><div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px"><div style="font-size:12px;font-weight:700;color:${idx===0?'var(--accent)':'var(--text-muted)'}">${idx===0?'Most Recent — ':''}${fmtDate(session.date)}${session.machine>1?` <span style="color:var(--accent)">· M${session.machine}</span>`:''}</div>${isPR?`<div style="font-size:10px;font-weight:800;background:var(--amber-dim);color:var(--amber);border:1px solid var(--amber);border-radius:20px;padding:2px 7px">🏆 PR</div>`:''}</div><div style="font-size:13px;color:var(--text-muted);line-height:1.8">${session.sets.map(s=>`<span style="color:var(--text);font-weight:700">${fmtLift(s.weight)}</span> × ${s.reps}${effMark(s)}`).join(' &nbsp;·&nbsp; ')}</div><div style="font-size:11px;color:var(--text-muted);margin-top:4px">Best: ${fmtLift(best.weight)} × ${best.reps} &nbsp;·&nbsp; ${session.sets.length} set${session.sets.length!==1?'s':''}</div></div>`; }).join('')}</div></div>`;
 }
 
 // ── CARDIO SCREENS ────────────────────────────────────────────────────────────
@@ -1618,6 +1623,7 @@ function renderHistory(){
       </div>
     </div>
 
+    ${resuming?`<div class="card" style="border-color:var(--amber);display:flex;align-items:center;gap:10px;padding:12px 14px"><div style="flex:1;min-width:0"><div style="font-size:13px;font-weight:800;color:var(--amber)">⏸ ${fmtDate(state._currentSession.date)} workout is open in the Workout tab</div><div style="font-size:11px;color:var(--text-muted);margin-top:2px">It's hidden from the list below until you finish or cancel it there.</div></div><button class="btn btn-amber btn-sm" id="goto-resumed" style="flex-shrink:0">Open</button></div>`:''}
     <div class="toggle-group">
       <div class="toggle-opt ${state.historyTab==='plan'?'active':''}" data-histtab="plan">Plan</div>
       <div class="toggle-opt ${state.historyTab==='sessions'?'active':''}" data-histtab="sessions">Workouts</div>
@@ -1641,7 +1647,7 @@ function renderHistory(){
               const parts=[ex.duration?fmtDuration(ex.duration):null,ex.distance?`${ex.distance} ${ex.distUnit}`:'',ex.heartRate?`♥ ${ex.heartRate} bpm`:''].filter(Boolean);
               return `<div style="display:flex;align-items:flex-start;gap:8px"><div style="flex:1;min-width:0"><div class="history-exercise">Cardio — ${ex.name}</div><div class="history-sets">${parts.join(' · ')||'No details'}</div></div>${editBtn}</div>`;
             }
-            return `<div style="display:flex;align-items:flex-start;gap:8px"><div style="flex:1;min-width:0"><div class="history-exercise">${ex.muscle} — ${ex.name}</div><div class="history-sets">${ex.sets.map(set=>`${set.type==='warmup'?'WU':'●'} ${fmtLift(set.weight)} × ${set.reps}${effMark(set)}`).join('  ')}</div></div>${editBtn}</div>`;
+            return `<div style="display:flex;align-items:flex-start;gap:8px"><div style="flex:1;min-width:0"><div class="history-exercise">${ex.muscle} — ${ex.name}${(ex.machine||1)>1?` <span style="color:var(--accent);font-size:11px;font-weight:800">M${ex.machine}</span>`:''}</div><div class="history-sets">${ex.sets.map(set=>`${set.type==='warmup'?'WU':'●'} ${fmtLift(set.weight)} × ${set.reps}${effMark(set)}`).join('  ')}</div></div>${editBtn}</div>`;
           }).join('')}
         </div>`).join('')}
     `:state.historyTab==='records'?`
@@ -2045,7 +2051,7 @@ function attachEvents(){
   }));
 
   document.querySelectorAll('[data-muscle]').forEach(b=>b.addEventListener('click',()=>{ state.selectedMuscle=b.dataset.muscle; state.searchQ=''; state.logStep='exercise'; render(); }));
-  document.querySelectorAll('[data-exercise]').forEach(b=>b.addEventListener('click',e=>{ if(e.target.closest('[data-fav]')) return; const name=b.dataset.exercise; if(state.split){ splitAddOrSwitch(name); } else { state.selectedExercise=name; state.pendingSets=[]; } state.logStep='sets'; render(); }));
+  document.querySelectorAll('[data-exercise]').forEach(b=>b.addEventListener('click',e=>{ if(e.target.closest('[data-fav]')) return; const name=b.dataset.exercise; if(state.split){ splitAddOrSwitch(name); } else { state.selectedExercise=name; state.pendingSets=[]; state.machine=1; } state.logStep='sets'; render(); }));
 
   // Super sets
   el('split-set-btn', startSplitPick);
@@ -2083,6 +2089,7 @@ function attachEvents(){
   document.querySelectorAll('[data-toggle]').forEach(b=>b.addEventListener('click',()=>{ state.setType=b.dataset.toggle; render(); }));
   document.querySelectorAll('[data-effort]').forEach(b=>b.addEventListener('click',()=>{ state.effort=b.dataset.effort; render(); }));
   document.querySelectorAll('[data-loadmode]').forEach(b=>b.addEventListener('click',()=>{ state.loadMode=b.dataset.loadmode; render(); }));
+  document.querySelectorAll('[data-machine]').forEach(b=>b.addEventListener('click',()=>{ state.machine=parseInt(b.dataset.machine); render(); }));
   document.querySelectorAll('[data-wunit]').forEach(b=>b.addEventListener('click',()=>{ state.weightUnit=b.dataset.wunit; localStorage.setItem('li_weight_unit',state.weightUnit); render(); }));
   document.querySelectorAll('[data-lunit]').forEach(b=>b.addEventListener('click',()=>{
     const u=b.dataset.lunit; if(u===state.liftUnit) return;
@@ -2110,15 +2117,8 @@ function attachEvents(){
   el('next-exercise',()=>{ commitExercise(); state.logStep='exercise'; render(); });
   el('new-muscle',()=>{ commitExercise(); state.logStep='workout'; render(); });
 
-  el('finish-workout',()=>{
-    commitExercise();
-    if(state._currentSession?.exercises?.length){ const sess=state._currentSession; state.sessions.push(sess); dbSaveSession(sess); toast('Workout saved! 💪'); }
-    state._currentSession=null; state._resumedSnapshot=null; state.pendingSets=[]; state.logStep='workout'; state.view='history'; render();
-  });
-  el('finish-from-workout',()=>{
-    if(state._currentSession?.exercises?.length){ const sess=state._currentSession; state.sessions.push(sess); dbSaveSession(sess); toast('Workout saved! 💪'); }
-    state._currentSession=null; state._resumedSnapshot=null; state.pendingSets=[]; state.logStep='workout'; state.view='history'; render();
-  });
+  el('finish-workout',()=>{ finishWorkout(true); });
+  el('finish-from-workout',()=>{ finishWorkout(false); });
   el('cancel-workout',()=>{
     if(confirm('Cancel workout? Unsaved sets will be lost.')){
       swStop();
@@ -2161,6 +2161,7 @@ function attachEvents(){
   el('log-cardio',()=>{ logCardioActivity(); });
 
   document.querySelectorAll('.resume-btn').forEach(b=>b.addEventListener('click',()=>{ if(!b.disabled) resumeSession(b.dataset.resume); }));
+  el('goto-resumed',()=>{ state.view='log'; render(); });
   document.querySelectorAll('.del-session-btn').forEach(b=>b.addEventListener('click',()=>{ if(confirm('Delete this workout session?')){ state.sessions=state.sessions.filter(s=>s.id!==b.dataset.delSession); dbDeleteSession(b.dataset.delSession); render(); } }));
   document.querySelectorAll('[data-edit-ex]').forEach(b=>b.addEventListener('click',()=>{ const [sid,i]=b.dataset.editEx.split('|'); showEditExerciseModal(sid,parseInt(i)); }));
 
@@ -2283,9 +2284,9 @@ function attachEvents(){
 // ACTIVE exercise's sets live in state.pendingSets (source of truth) and are
 // parked into its split entry whenever you hop exercises. On commit, each
 // exercise saves as its own session entry, so history/PRs/volume are unchanged.
-function syncActiveSplit(){ if(state.split&&state.split[state.splitIdx]) state.split[state.splitIdx].sets=[...state.pendingSets]; }
+function syncActiveSplit(){ if(state.split&&state.split[state.splitIdx]){ state.split[state.splitIdx].sets=[...state.pendingSets]; state.split[state.splitIdx].machine=state.machine; } }
 function startSplitPick(){
-  if(!state.split){ state.split=[{muscle:state.selectedMuscle,name:state.selectedExercise,sets:[...state.pendingSets]}]; state.splitIdx=0; }
+  if(!state.split){ state.split=[{muscle:state.selectedMuscle,name:state.selectedExercise,sets:[...state.pendingSets],machine:state.machine}]; state.splitIdx=0; }
   else syncActiveSplit();
   state.splitPicking=true; state.searchQ=''; state.logStep='workout'; render();
 }
@@ -2293,10 +2294,11 @@ function splitAddOrSwitch(name){
   const sp=state.split; if(!sp) return;
   syncActiveSplit();
   let i=sp.findIndex(e=>e.name===name);
-  if(i<0){ sp.push({muscle:state.selectedMuscle,name,sets:[]}); i=sp.length-1; }
+  if(i<0){ sp.push({muscle:state.selectedMuscle,name,sets:[],machine:1}); i=sp.length-1; }
   state.splitIdx=i;
   state.selectedMuscle=sp[i].muscle; state.selectedExercise=sp[i].name;
   state.pendingSets=[...sp[i].sets];
+  state.machine=sp[i].machine||1;
   state.splitPicking=false;
 }
 function commitExercise(){
@@ -2308,7 +2310,8 @@ function commitExercise(){
     if(!state._currentSession) state._currentSession={id:uid(),date:Date.now(),exercises:[]};
     entries.forEach(en=>{
       const working=en.sets.filter(s=>s.type==='working');
-      if(working.length){
+      // Records track the primary machine only — M2/M3 lifts never set PRs.
+      if(working.length&&(en.machine||1)===1){
         const assisted=isAssisted(en.name);
         const best=bestSet(working,assisted);
         const pr=state.prs[en.name];
@@ -2318,7 +2321,7 @@ function commitExercise(){
           toast('🏆 New PR!','var(--amber)');
         }
       }
-      state._currentSession.exercises.push({muscle:en.muscle,name:en.name,sets:[...en.sets]});
+      state._currentSession.exercises.push({muscle:en.muscle,name:en.name,sets:[...en.sets],...((en.machine||1)>1?{machine:en.machine}:{})});
     });
     state.pendingSets=[];
     return;
@@ -2326,7 +2329,8 @@ function commitExercise(){
   if(!state.pendingSets.length) return;
   if(!state._currentSession) state._currentSession={id:uid(),date:Date.now(),exercises:[]};
   const working=state.pendingSets.filter(s=>s.type==='working');
-  if(working.length){
+  // Records track the primary machine only — M2/M3 lifts never set PRs.
+  if(working.length&&state.machine===1){
     const assisted=isAssisted(state.selectedExercise);
     const best=bestSet(working,assisted);
     const pr=state.prs[state.selectedExercise];
@@ -2336,8 +2340,32 @@ function commitExercise(){
       toast('🏆 New PR!','var(--amber)');
     }
   }
-  state._currentSession.exercises.push({muscle:state.selectedMuscle,name:state.selectedExercise,sets:[...state.pendingSets]});
+  state._currentSession.exercises.push({muscle:state.selectedMuscle,name:state.selectedExercise,sets:[...state.pendingSets],...(state.machine>1?{machine:state.machine}:{})});
   state.pendingSets=[];
+}
+
+// Finish & Save on a RESUMED session overwrites its DB row. If that row was
+// edited after the resume began (✎ in Plans, another device), warn before
+// clobbering those edits. Fresh (non-resumed) workouts save straight through,
+// and any fetch error fails open — saving must never be blocked by a hiccup.
+async function confirmResumedOverwrite(sess){
+  if(!state._resumedSnapshot||state._resumedSnapshot.id!==sess.id) return true;
+  try{
+    const {data,error}=await sb.from('sessions').select('exercises').eq('id',sess.id).eq('user_id',currentUser.id).maybeSingle();
+    if(!error&&data&&JSON.stringify(data.exercises)!==JSON.stringify(state._resumedSnapshot.exercises)){
+      return confirm('Heads up: this workout was edited after you resumed it (in Plans, or on another device). Saving will overwrite those edits with what you see now. Save anyway?');
+    }
+  }catch(e){}
+  return true;
+}
+async function finishWorkout(doCommit){
+  if(doCommit) commitExercise();
+  if(state._currentSession?.exercises?.length){
+    const sess=state._currentSession;
+    if(!(await confirmResumedOverwrite(sess))) return;  // declined — workout stays open
+    state.sessions.push(sess); dbSaveSession(sess); toast('Workout saved! 💪');
+  }
+  state._currentSession=null; state._resumedSnapshot=null; state.pendingSets=[]; state.logStep='workout'; state.view='history'; render();
 }
 
 function resumeSession(sessionId){
@@ -2365,13 +2393,13 @@ function exportAllCSV(){ try{
   const date=new Date().toISOString().slice(0,10);
   const rows=[]; const blank=['','','','','','',''];
   rows.push(['WORKOUTS','','','','','','']);
-  rows.push(['Date','Muscle Group','Exercise','Set Type','Set #','Weight (lbs)','Reps','Effort','Loading']);
+  rows.push(['Date','Muscle Group','Exercise','Set Type','Set #','Weight (lbs)','Reps','Effort','Loading','Machine']);
   const cardio=[];
   state.sessions.forEach(s=>{ const d=new Date(s.date).toLocaleDateString('en-US'); s.exercises.forEach(ex=>{
     // Cardio entries have no sets array — collect for their own section below.
     if(ex.type==='cardio'){ cardio.push([d,ex.name,ex.duration?fmtDuration(ex.duration):'',ex.distance||'',ex.distance?ex.distUnit:'',ex.heartRate||'','']); return; }
     if(!Array.isArray(ex.sets)) return;
-    let wu=0,wk=0; ex.sets.forEach(set=>{ if(set.type==='warmup') wu++; else wk++; rows.push([d,ex.muscle,ex.name,set.type,set.type==='warmup'?wu:wk,set.weight,set.reps,set.effort==='f'?'Failure':set.effort==='nf'?'Near Failure':'',set.uni?'Unilateral':'']); });
+    let wu=0,wk=0; ex.sets.forEach(set=>{ if(set.type==='warmup') wu++; else wk++; rows.push([d,ex.muscle,ex.name,set.type,set.type==='warmup'?wu:wk,set.weight,set.reps,set.effort==='f'?'Failure':set.effort==='nf'?'Near Failure':'',set.uni?'Unilateral':'',(ex.machine||1)>1?'M'+ex.machine:'']); });
   }); });
   if(cardio.length){
     rows.push(blank);
@@ -2410,7 +2438,7 @@ let _exEdit=null;  // {sessionId, exIdx, name, cardio, sets:[...]}
 function showEditExerciseModal(sessionId,exIdx){
   const s=state.sessions.find(x=>x.id===sessionId); if(!s) return;
   const ex=s.exercises[exIdx]; if(!ex) return;
-  _exEdit={sessionId,exIdx,name:ex.name,cardio:ex.type==='cardio',sets:ex.type==='cardio'?[]:JSON.parse(JSON.stringify(ex.sets||[]))};
+  _exEdit={sessionId,exIdx,name:ex.name,cardio:ex.type==='cardio',machine:ex.machine||1,sets:ex.type==='cardio'?[]:JSON.parse(JSON.stringify(ex.sets||[]))};
   renderExEditModal();
 }
 function exEditSync(){
@@ -2440,7 +2468,7 @@ function renderExEditModal(){
   }).join('');
   document.getElementById('modal-root').innerHTML=`<div class="modal-overlay" id="modal-overlay"><div class="modal" style="max-height:88vh;overflow-y:auto">
     <div class="modal-title">Edit — ${esc(_exEdit.name)}</div>
-    ${d.cardio?`<div style="font-size:13px;color:var(--text-muted);margin-bottom:12px">Cardio entries can be removed here; to change the details, remove and re-log it.</div>`:`<div class="section-gap">${rows||'<div class="empty" style="padding:6px 0">No sets left — Save will remove this exercise.</div>'}</div><div style="font-size:11px;color:var(--text-muted);margin-top:8px">Weights in ${liftUnitLabel()} · NF/F = effort · UNI = one side</div>`}
+    ${d.cardio?`<div style="font-size:13px;color:var(--text-muted);margin-bottom:12px">Cardio entries can be removed here; to change the details, remove and re-log it.</div>`:`<button class="btn btn-outline btn-sm btn-full" id="exd-machine" style="margin-bottom:12px;${d.machine>1?'color:var(--accent);border-color:var(--accent)':''}">Machine ${d.machine} ${d.machine===1?'· primary (counts for Records)':'· tagged, excluded from Records'} — tap to change</button><div class="section-gap">${rows||'<div class="empty" style="padding:6px 0">No sets left — Save will remove this exercise.</div>'}</div><div style="font-size:11px;color:var(--text-muted);margin-top:8px">Weights in ${liftUnitLabel()} · NF/F = effort · UNI = one side</div>`}
     <button class="btn btn-danger btn-full" id="exd-remove" style="margin-top:12px">Remove Exercise from This Workout</button>
     <div class="btn-grid" style="margin-top:10px"><button class="btn btn-outline" id="modal-cancel">Cancel</button>${d.cardio?'':'<button class="btn btn-primary" id="exd-save">Save</button>'}</div>
   </div></div>`;
@@ -2449,6 +2477,8 @@ function renderExEditModal(){
   document.querySelectorAll('[data-exd-eff]').forEach(b=>b.addEventListener('click',()=>{ exEditSync(); const st=_exEdit.sets[parseInt(b.dataset.exdEff)]; st.effort=st.effort==='nf'?'f':st.effort==='f'?undefined:'nf'; if(!st.effort) delete st.effort; renderExEditModal(); }));
   document.querySelectorAll('[data-exd-uni]').forEach(b=>b.addEventListener('click',()=>{ exEditSync(); const st=_exEdit.sets[parseInt(b.dataset.exdUni)]; if(st.uni) delete st.uni; else st.uni=true; renderExEditModal(); }));
   document.querySelectorAll('[data-exd-del]').forEach(b=>b.addEventListener('click',()=>{ exEditSync(); _exEdit.sets.splice(parseInt(b.dataset.exdDel),1); renderExEditModal(); }));
+  const mb=document.getElementById('exd-machine');
+  if(mb) mb.addEventListener('click',()=>{ exEditSync(); _exEdit.machine=_exEdit.machine>=3?1:_exEdit.machine+1; renderExEditModal(); });
   document.getElementById('exd-remove').addEventListener('click',()=>{ if(!confirm(`Remove "${_exEdit.name}" from this workout?`)) return; exEditApply(true); });
   const sv=document.getElementById('exd-save');
   if(sv) sv.addEventListener('click',()=>{ exEditSync(); exEditApply(false); });
@@ -2459,7 +2489,7 @@ function exEditApply(removeAll){
   const ex=s.exercises[d.exIdx];
   const gone=removeAll||(!d.cardio&&!d.sets.length);
   if(gone) s.exercises.splice(d.exIdx,1);
-  else ex.sets=d.sets;
+  else{ ex.sets=d.sets; if(d.machine>1) ex.machine=d.machine; else delete ex.machine; }
   if(!s.exercises.length){
     // Last exercise removed → the whole session goes.
     state.sessions=state.sessions.filter(x=>x.id!==s.id);
@@ -2823,7 +2853,7 @@ function showPRModal(exercise){
         const working=(ex.sets||[]).filter(s=>s.type==='working');
         if(working.length){
           const best=bestSet(working,assisted);
-          history.push({date:s.date,weight:best.weight,reps:best.reps,sets:working});
+          history.push({date:s.date,weight:best.weight,reps:best.reps,sets:working,machine:ex.machine||1});
         }
       }
     });
@@ -2844,13 +2874,13 @@ function showPRModal(exercise){
           ${history.length>=2?`
             <div class="card-title" style="margin-bottom:8px">Weight Progression</div>
             <div style="background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:12px;margin-bottom:16px">
-              ${renderProgressChart(history.map(h=>({date:h.date,weight:lbsToLift(h.weight)})))}
+              ${renderProgressChart(history.filter(h=>h.machine===1).map(h=>({date:h.date,weight:lbsToLift(h.weight)})))}
             </div>`:``}
           <div class="card-title" style="margin-bottom:8px">Session Log</div>
           <div class="section-gap">
             ${[...history].reverse().map(h=>`
               <div style="background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:10px 14px">
-                <div style="font-size:12px;color:var(--text-muted);margin-bottom:4px">${fmtDate(h.date)}</div>
+                <div style="font-size:12px;color:var(--text-muted);margin-bottom:4px">${fmtDate(h.date)}${h.machine>1?` <span style="color:var(--accent);font-weight:800">· M${h.machine}</span>`:''}</div>
                 <div style="font-size:13px;color:var(--text-muted)">${h.sets.map(s=>`<span style="color:var(--text);font-weight:700">${fmtLift(s.weight)}</span> × ${s.reps}${effMark(s)}`).join(' · ')}</div>
               </div>`).join('')}
             ${history.length===0?'<div class="empty">No working sets logged yet</div>':''}
