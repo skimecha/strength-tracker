@@ -406,7 +406,7 @@ async function deleteTicket(id){
   await loadSupportTickets(true); toast('Ticket deleted'); render();
 }
 
-const APP_VERSION = '2.36.0';
+const APP_VERSION = '2.37.0';
 const OWNER_UID     = '031a65ed-f52d-4a67-b271-47778e920c22';
 // Invite code from the URL (?invite=CODE) — drives the invite-only signup flow.
 let pendingInvite = new URLSearchParams(location.search).get('invite');
@@ -495,6 +495,7 @@ let state = {
   macroGoals:{calories:2500,protein:180,carbs:250,fat:80},
   foodLog:[],mealFavorites:[],
   mealPrep:{meals:[],overrides:{}},mpStep:'week',mpWeekOff:0,mpDraft:null,
+  machinePhotos:{},
   weightLog:[],
   weightUnit: localStorage.getItem('li_weight_unit') || 'lbs',
   theme: localStorage.getItem('li_theme') || 'light',
@@ -535,6 +536,7 @@ function resetAppState(){
   state.sessions=[]; state.prs={}; state.favorites=[]; state.exerciseSettings={}; state.planTargets={hypertrophy:{},strength:{}};
   state.foodLog=[]; state.mealFavorites=[]; state.weightLog=[];
   state.mealPrep={meals:[],overrides:{}}; state.mpDraft=null; state.mpStep='week'; state.mpWeekOff=0;
+  state.machinePhotos={}; Object.keys(_machinePhotoFetched).forEach(k=>delete _machinePhotoFetched[k]);
   state.macroGoals={calories:2500,protein:180,carbs:250,fat:80};
   state.logStep='type'; state._currentSession=null; state._resumedSnapshot=null; state.pendingSets=[]; state.view='log';
   state.split=null; state.splitIdx=0; state.splitPicking=false;
@@ -1107,7 +1109,68 @@ function renderExerciseSelect(){
     <button class="btn btn-outline btn-full" id="add-custom-btn" style="margin-top:4px">＋ Add Exercise to ${muscle}</button>`;
 }
 
+// ── Machine photos ────────────────────────────────────────────────────────────
+// A photo pinned to (exercise, machine number) so the 1/2/3 toggle can be
+// matched visually to a real machine. Downscaled to ~640px JPEG client-side
+// (tens of KB) and stored per-user in machine_photos (machine-photos-setup.sql).
+// Loaded lazily per exercise, once per session (attempt-guarded: a missing
+// table or offline fetch must never re-render in a loop).
+const _machinePhotoFetched={};
+function machinePhotosFor(ex){ return (ex&&state.machinePhotos[ex])||{}; }
+function loadMachinePhotos(ex){
+  if(!ex||_machinePhotoFetched[ex]||!currentUser) return;
+  _machinePhotoFetched[ex]=true;
+  sb.from('machine_photos').select('machine,data').eq('user_id',currentUser.id).eq('exercise',ex).then(({data,error})=>{
+    if(error||!Array.isArray(data)||!data.length) return;
+    const m={}; data.forEach(r=>{ m[r.machine]=r.data; });
+    state.machinePhotos[ex]=m;
+    if(state.view==='log'&&state.logStep==='sets'&&state.selectedExercise===ex) render();
+  },()=>{});
+}
+function downscalePhoto(file,maxDim,q){
+  return new Promise((res,rej)=>{
+    const img=new Image(); const url=URL.createObjectURL(file);
+    img.onload=()=>{ try{
+      const sc=Math.min(1,maxDim/Math.max(img.width,img.height));
+      const c=document.createElement('canvas'); c.width=Math.max(1,Math.round(img.width*sc)); c.height=Math.max(1,Math.round(img.height*sc));
+      c.getContext('2d').drawImage(img,0,0,c.width,c.height);
+      URL.revokeObjectURL(url); res(c.toDataURL('image/jpeg',q));
+    }catch(e){ URL.revokeObjectURL(url); rej(e); } };
+    img.onerror=()=>{ URL.revokeObjectURL(url); rej(new Error('Could not read that image.')); };
+    img.src=url;
+  });
+}
+async function saveMachinePhoto(ex,machine,file){
+  try{
+    toast('Processing photo…');
+    const dataUrl=await downscalePhoto(file,640,0.72);
+    const {error}=await sb.from('machine_photos').upsert({user_id:currentUser.id,exercise:ex,machine,data:dataUrl,updated_at:new Date().toISOString()},{onConflict:'user_id,exercise,machine'});
+    if(error){ toast('Photo save failed — run machine-photos-setup.sql','var(--red)'); return; }
+    (state.machinePhotos[ex]=state.machinePhotos[ex]||{})[machine]=dataUrl;
+    toast(`Machine ${machine} photo saved 📷`); render();
+  }catch(e){ toast('Could not process that photo','var(--red)'); }
+}
+function removeMachinePhoto(ex,machine){
+  if(state.machinePhotos[ex]) delete state.machinePhotos[ex][machine];
+  sb.from('machine_photos').delete().eq('user_id',currentUser.id).eq('exercise',ex).eq('machine',machine).then(null,()=>{});
+  toast('Photo removed'); closeModal(); render();
+}
+function showMachinePhotoModal(ex,machine){
+  const ph=machinePhotosFor(ex)[machine]; if(!ph) return;
+  document.getElementById('modal-root').innerHTML=`<div class="modal-overlay" id="modal-overlay"><div class="modal" style="max-height:88vh;overflow-y:auto">
+    <div class="modal-title">Machine ${machine} — ${esc(ex)}</div>
+    <img src="${ph}" alt="Machine ${machine}" style="width:100%;border-radius:var(--radius-sm);border:1px solid var(--border);display:block;margin-bottom:12px">
+    <div class="btn-grid"><button class="btn btn-outline" id="mphoto-replace">📷 Replace</button><button class="btn btn-danger" id="mphoto-remove">Remove</button></div>
+    <button class="btn btn-outline btn-full" id="modal-cancel" style="margin-top:10px">Close</button>
+  </div></div>`;
+  document.getElementById('modal-cancel').addEventListener('click',closeModal);
+  document.getElementById('modal-overlay').addEventListener('click',e=>{ if(e.target===e.currentTarget) closeModal(); });
+  document.getElementById('mphoto-replace').addEventListener('click',()=>{ closeModal(); const f=document.getElementById('machine-photo-file'); if(f) f.click(); });
+  document.getElementById('mphoto-remove').addEventListener('click',()=>{ if(confirm(`Remove the Machine ${machine} photo for ${ex}?`)) removeMachinePhoto(ex,machine); });
+}
+
 function renderSets(){
+  if(state.selectedExercise) loadMachinePhotos(state.selectedExercise);
   const warmupSets=state.pendingSets.filter(s=>s.type==='warmup');
   const workingSets=state.pendingSets.filter(s=>s.type==='working');
   const setNum=state.setType==='warmup'?warmupSets.length+1:workingSets.length+1;
@@ -1117,6 +1180,12 @@ function renderSets(){
     <div class="card"><div class="card-title">Set Type</div><div class="toggle-group"><div class="toggle-opt ${state.setType==='warmup'?'active':''}" data-toggle="warmup">Warmup</div><div class="toggle-opt ${state.setType==='working'?'active':''}" data-toggle="working">Working</div></div>
       <div style="display:flex;align-items:center;gap:10px;margin-top:10px"><label style="margin:0;flex-shrink:0">Machine</label><div class="toggle-group" style="flex:1"><div class="toggle-opt ${state.machine===1?'active':''}" data-machine="1" style="padding:6px 0;font-size:13px">1</div><div class="toggle-opt ${state.machine===2?'active':''}" data-machine="2" style="padding:6px 0;font-size:13px">2</div><div class="toggle-opt ${state.machine===3?'active':''}" data-machine="3" style="padding:6px 0;font-size:13px">3</div></div></div>
       ${state.machine>1?`<div style="font-size:11px;color:var(--text-muted);margin-top:6px">Machine ${state.machine} sets are logged and tagged M${state.machine} — Records track Machine 1 (primary) only</div>`:''}
+      ${(()=>{ const ph=machinePhotosFor(state.selectedExercise); const cur=ph[state.machine];
+        return `<div style="display:flex;gap:8px;margin-top:10px;align-items:center">
+          ${[1,2,3].filter(m=>ph[m]).map(m=>`<button data-mphoto-pick="${m}" aria-label="Select machine ${m}" style="position:relative;width:54px;height:54px;border-radius:8px;overflow:hidden;border:2px solid ${state.machine===m?'var(--accent)':'var(--border)'};padding:0;background:none;cursor:pointer;flex-shrink:0"><img src="${ph[m]}" alt="Machine ${m}" style="width:100%;height:100%;object-fit:cover;display:block"><span style="position:absolute;bottom:1px;right:4px;color:#fff;font-size:12px;font-weight:900;text-shadow:0 0 4px #000">${m}</span></button>`).join('')}
+          <button class="btn btn-outline btn-xs" id="machine-photo-btn" style="margin-left:auto;flex-shrink:0">📷 ${cur?`View M${state.machine}`:`Add photo · M${state.machine}`}</button>
+        </div>
+        <input type="file" id="machine-photo-file" accept="image/*" style="display:none">`; })()}
     </div>
     <div class="card">
       <div class="card-title">${state.setType==='warmup'?'Warmup':'Working'} Set ${setNum}</div>
@@ -2090,6 +2159,14 @@ function attachEvents(){
   document.querySelectorAll('[data-effort]').forEach(b=>b.addEventListener('click',()=>{ state.effort=b.dataset.effort; render(); }));
   document.querySelectorAll('[data-loadmode]').forEach(b=>b.addEventListener('click',()=>{ state.loadMode=b.dataset.loadmode; render(); }));
   document.querySelectorAll('[data-machine]').forEach(b=>b.addEventListener('click',()=>{ state.machine=parseInt(b.dataset.machine); render(); }));
+  document.querySelectorAll('[data-mphoto-pick]').forEach(b=>b.addEventListener('click',()=>{ state.machine=parseInt(b.dataset.mphotoPick); render(); }));
+  el('machine-photo-btn',()=>{
+    const ph=machinePhotosFor(state.selectedExercise);
+    if(ph[state.machine]) showMachinePhotoModal(state.selectedExercise,state.machine);
+    else{ const f=document.getElementById('machine-photo-file'); if(f) f.click(); }
+  });
+  { const f=document.getElementById('machine-photo-file');
+    if(f) f.addEventListener('change',()=>{ const file=f.files&&f.files[0]; if(file) saveMachinePhoto(state.selectedExercise,state.machine,file); f.value=''; }); }
   document.querySelectorAll('[data-wunit]').forEach(b=>b.addEventListener('click',()=>{ state.weightUnit=b.dataset.wunit; localStorage.setItem('li_weight_unit',state.weightUnit); render(); }));
   document.querySelectorAll('[data-lunit]').forEach(b=>b.addEventListener('click',()=>{
     const u=b.dataset.lunit; if(u===state.liftUnit) return;
