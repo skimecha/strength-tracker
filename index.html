@@ -406,7 +406,7 @@ async function deleteTicket(id){
   await loadSupportTickets(true); toast('Ticket deleted'); render();
 }
 
-const APP_VERSION = '2.37.0';
+const APP_VERSION = '2.38.0';
 const OWNER_UID     = '031a65ed-f52d-4a67-b271-47778e920c22';
 // Invite code from the URL (?invite=CODE) — drives the invite-only signup flow.
 let pendingInvite = new URLSearchParams(location.search).get('invite');
@@ -495,7 +495,7 @@ let state = {
   macroGoals:{calories:2500,protein:180,carbs:250,fat:80},
   foodLog:[],mealFavorites:[],
   mealPrep:{meals:[],overrides:{}},mpStep:'week',mpWeekOff:0,mpDraft:null,
-  machinePhotos:{},
+  machinePhotos:{},weeklySplit:{},
   weightLog:[],
   weightUnit: localStorage.getItem('li_weight_unit') || 'lbs',
   theme: localStorage.getItem('li_theme') || 'light',
@@ -533,7 +533,7 @@ async function initAuth(){
 }
 
 function resetAppState(){
-  state.sessions=[]; state.prs={}; state.favorites=[]; state.exerciseSettings={}; state.planTargets={hypertrophy:{},strength:{}};
+  state.sessions=[]; state.prs={}; state.favorites=[]; state.exerciseSettings={}; state.planTargets={hypertrophy:{},strength:{}}; state.weeklySplit={};
   state.foodLog=[]; state.mealFavorites=[]; state.weightLog=[];
   state.mealPrep={meals:[],overrides:{}}; state.mpDraft=null; state.mpStep='week'; state.mpWeekOff=0;
   state.machinePhotos={}; Object.keys(_machinePhotoFetched).forEach(k=>delete _machinePhotoFetched[k]);
@@ -578,7 +578,7 @@ async function loadUserData(){
     state.favorites     = (ef.data|| []).map(r=>r.exercise);
     state.customExercises = ce.data || [];
     // Plan targets — loaded separately so a missing table never aborts the main data load.
-    try{ const pg=await sb.from('plan_targets').select('targets').eq('user_id',userId).maybeSingle(); const raw=(pg.data&&pg.data.targets)||{}; state.planTargets=(raw.hypertrophy||raw.strength)?{hypertrophy:raw.hypertrophy||{},strength:raw.strength||{}}:{hypertrophy:raw,strength:{}}; }catch(e){ state.planTargets={hypertrophy:{},strength:{}}; }
+    try{ const pg=await sb.from('plan_targets').select('targets').eq('user_id',userId).maybeSingle(); const raw=(pg.data&&pg.data.targets)||{}; state.weeklySplit=(raw.split&&typeof raw.split==='object'&&!Array.isArray(raw.split))?raw.split:{}; delete raw.split; state.planTargets=(raw.hypertrophy||raw.strength)?{hypertrophy:raw.hypertrophy||{},strength:raw.strength||{}}:{hypertrophy:raw,strength:{}}; }catch(e){ state.planTargets={hypertrophy:{},strength:{}}; state.weeklySplit={}; }
     await loadDevNotes();  // separate so a missing dev_notes table never aborts the main load
     // Per-exercise settings (assisted flag). Isolated so a missing table never aborts the load.
     try{ const es=await sb.from('exercise_settings').select('exercise,assisted').eq('user_id',userId); if(!es.error&&Array.isArray(es.data)){ const m={}; es.data.forEach(r=>{ m[r.exercise]={assisted:!!r.assisted}; }); state.exerciseSettings=m; } }catch(e){ state.exerciseSettings={}; }
@@ -1058,9 +1058,10 @@ function renderWorkoutScreen(){
     <div class="subtitle">${fmtDate(Date.now())}</div>
     ${state.splitPicking?`<div style="background:var(--accent-dim);border:1px solid var(--accent);border-radius:var(--radius-sm);padding:10px 14px;font-size:13px;color:var(--accent);font-weight:700;display:flex;align-items:center;justify-content:space-between;gap:10px"><span>⑂ Super set — choose the next exercise.</span><button class="btn btn-outline btn-xs" id="split-cancel-pick" style="flex-shrink:0">Cancel</button></div>`
       :hasSets?`<div style="background:var(--accent-dim);border:1px solid var(--accent);border-radius:var(--radius-sm);padding:10px 14px;font-size:13px;color:var(--accent);font-weight:700">↩ Resuming ${fmtDate(state._currentSession.date)} — ${state._currentSession.exercises.length} exercise${state._currentSession.exercises.length!==1?'s':''} logged. Add more or finish.</div>`:''}
+    ${(()=>{ const tt=todayTargets(); if(tt.length) return `<div style="background:var(--green-dim);border:1px solid var(--green);border-radius:var(--radius-sm);padding:8px 12px;font-size:12px;font-weight:700;color:var(--green)">● Today's focus: ${tt.map(esc).join(' · ')}</div>`; const nd=splitNextDay(); return nd!==null?`<div style="font-size:11px;color:var(--text-muted);text-align:center">Rest day on your split · next: ${MP_DAY_NAME[nd]} — ${(state.weeklySplit[nd]||[]).map(esc).join(' · ')}</div>`:''; })()}
     <div>
       <div class="card-title" style="margin-bottom:10px">Strength Training</div>
-      <div class="muscle-grid">${Object.keys(GROUPS).map(g=>`<button class="muscle-btn" data-group="${g}">${g}${volBar(weekly,GROUPS[g],session)}</button>`).join('')}</div>
+      <div class="muscle-grid">${Object.keys(GROUPS).map(g=>`<button class="muscle-btn" data-group="${g}">${g}${GROUPS[g].some(m=>todayTargets().includes(m))?targetDot():''}${volBar(weekly,GROUPS[g],session)}</button>`).join('')}</div>
     </div>
     ${state.splitPicking?'':`<div>
       <div class="card-title" style="margin-bottom:10px">Cardio</div>
@@ -1079,7 +1080,7 @@ function renderGroupMuscleSelect(){
       <div class="page-title" style="font-size:20px">${state.selectedGroup}</div>
     </div>
     <div class="card"><div class="card-title">Select Muscle</div>
-      <div class="muscle-grid">${muscles.map(m=>`<button class="muscle-btn" data-muscle="${m}">${m}${volBar(weekly,[m],session)}</button>`).join('')}</div>
+      <div class="muscle-grid">${muscles.map(m=>`<button class="muscle-btn" data-muscle="${m}">${m}${todayTargets().includes(m)?targetDot():''}${volBar(weekly,[m],session)}</button>`).join('')}</div>
     </div>`;
 }
 
@@ -1761,8 +1762,45 @@ function setStrengthRedMode(m){ state.strengthRedMode=m; try{ localStorage.setIt
 function goalTargets(){ return (state.planTargets&&state.planTargets[state.goal])||{}; }
 function goalUpper(){ return state.goal==='strength'?12:20; }
 let _planSaveTimer=null;
+// ── Weekly split (day → target muscles) ──────────────────────────────────────
+// Stored inside plan_targets.targets.split as {jsDay: [muscle,...]} — repeats
+// every week; editing the grid is the "edit as I go". Shown as green dots on
+// the Workout screen's group and muscle buttons.
+function todayTargets(){ return state.weeklySplit[new Date().getDay()]||[]; }
+function splitNextDay(){ const t=new Date().getDay(); for(let i=1;i<=7;i++){ const d=(t+i)%7; if((state.weeklySplit[d]||[]).length) return d; } return null; }
+function targetDot(){ return '<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--green);margin-left:6px;box-shadow:0 0 5px var(--green);vertical-align:middle"></span>'; }
+function renderWeeklySplitCard(){
+  const today=new Date().getDay();
+  return `<div class="card" style="margin-bottom:8px"><div class="card-title">Weekly Split — Day Targets</div>
+    <div style="font-size:11px;color:var(--text-muted);margin-bottom:10px;line-height:1.5">Pick the muscles you plan to hit each day. The plan repeats every week, and today's targets show as green dots on the Workout screen. Tap a day to edit it.</div>
+    <div class="section-gap">
+    ${MP_DAY_ORDER.map(d=>{ const tt=state.weeklySplit[d]||[]; const isToday=d===today;
+      return `<button data-splitday="${d}" style="display:flex;align-items:flex-start;gap:8px;width:100%;text-align:left;background:${isToday?'var(--green-dim)':'var(--surface2)'};border:1px solid ${isToday?'var(--green)':'var(--border)'};border-radius:var(--radius-sm);padding:9px 12px;cursor:pointer;color:var(--text)">
+        <div style="width:40px;font-size:12px;font-weight:800;color:${isToday?'var(--green)':'var(--text-muted)'};flex-shrink:0;padding-top:1px">${MP_DAY_NAME[d]}</div>
+        <div style="flex:1;min-width:0;font-size:12px;font-weight:600;line-height:1.5">${tt.length?tt.map(esc).join(' · '):'<span style="color:var(--text-muted);font-weight:500">Rest</span>'}</div>
+        <div style="font-size:12px;color:var(--text-muted);flex-shrink:0">✎</div>
+      </button>`; }).join('')}
+    </div></div>`;
+}
+function showSplitDayModal(dow){
+  const sel=new Set(state.weeklySplit[dow]||[]);
+  const save=()=>{ const arr=Object.values(GROUPS).flat().filter(m=>sel.has(m)); if(arr.length) state.weeklySplit[dow]=arr; else delete state.weeklySplit[dow]; schedulePlanSave(); closeModal(); render(); };
+  const rerender=()=>{
+    document.getElementById('modal-root').innerHTML=`<div class="modal-overlay" id="modal-overlay"><div class="modal" style="max-height:88vh;overflow-y:auto">
+      <div class="modal-title">${MP_DAY_NAME[dow]} — Target Muscles</div>
+      ${Object.entries(GROUPS).map(([g,ms])=>`<div style="margin-bottom:10px"><div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--text-muted);margin-bottom:6px">${g}</div><div style="display:flex;flex-wrap:wrap;gap:6px">${ms.map(m=>`<button class="period-btn ${sel.has(m)?'active':''}" data-sd-m="${esc(m)}">${esc(m)}</button>`).join('')}</div></div>`).join('')}
+      <div class="btn-grid" style="margin-top:12px"><button class="btn btn-outline" id="sd-clear">Clear Day</button><button class="btn btn-primary" id="sd-done">Done</button></div>
+    </div></div>`;
+    document.getElementById('modal-overlay').addEventListener('click',e=>{ if(e.target===e.currentTarget) save(); });
+    document.querySelectorAll('[data-sd-m]').forEach(b=>b.addEventListener('click',()=>{ const m=b.dataset.sdM; if(sel.has(m)) sel.delete(m); else sel.add(m); rerender(); }));
+    document.getElementById('sd-clear').addEventListener('click',()=>{ sel.clear(); rerender(); });
+    document.getElementById('sd-done').addEventListener('click',save);
+  };
+  rerender();
+}
+
 function schedulePlanSave(){ clearTimeout(_planSaveTimer); _planSaveTimer=setTimeout(dbSavePlan,600); }
-async function dbSavePlan(){ const {error}=await sb.from('plan_targets').upsert({user_id:currentUser.id,targets:state.planTargets,updated_at:new Date().toISOString()},{onConflict:'user_id'}); if(error) toast('Could not save plan','var(--red)'); }
+async function dbSavePlan(){ const {error}=await sb.from('plan_targets').upsert({user_id:currentUser.id,targets:{...state.planTargets,split:state.weeklySplit},updated_at:new Date().toISOString()},{onConflict:'user_id'}); if(error) toast('Could not save plan','var(--red)'); }
 function volumeColor(n, goal){ goal=goal||state.goal; if(goal==='strength') return n>12?'var(--red)':n>=10?'#f97316':n>=6?'#eab308':'var(--accent)'; return n>20?'var(--red)':n>=18?'#f97316':n>=12?'#eab308':'var(--accent)'; }
 // Segmented progress bar — the filled portion is colored by which volume band
 // each slice of sets falls into (blue 0–12, gold 12–18, orange 18–20, red 20+,
@@ -1801,7 +1839,7 @@ function renderPlanTab(){
       <div class="toggle-opt ${goal==='strength'?'active':''}" data-goal="strength" style="font-size:13px">Strength</div>
       <div class="toggle-opt ${goal==='off'?'active':''}" data-goal="off" style="font-size:13px">Off</div>
     </div>`;
-  if(goal==='off') return toggle+`<div class="empty" style="line-height:1.6">Volume planning is off. Pick <b style="color:var(--text)">Hypertrophy</b> or <b style="color:var(--text)">Strength</b> above to set weekly per-muscle targets and see progress on your workout screens.</div>`;
+  if(goal==='off') return toggle+renderWeeklySplitCard()+`<div class="empty" style="line-height:1.6">Volume planning is off. Pick <b style="color:var(--text)">Hypertrophy</b> or <b style="color:var(--text)">Strength</b> above to set weekly per-muscle targets and see progress on your workout screens.</div>`;
   const strength=goal==='strength';
   const actual=weeklySetCounts(strength), t=goalTargets();
   const lg=(c,l)=>`<span style="display:inline-flex;align-items:center;gap:4px"><span style="display:inline-block;width:9px;height:9px;border-radius:2px;background:${c}"></span>${l}</span>`;
@@ -1825,6 +1863,7 @@ function renderPlanTab(){
   return toggle+`
     <div style="font-size:12px;color:var(--text-muted);margin-bottom:6px;line-height:1.5">${intro} Progress is for this week and resets Monday.</div>
     <div style="display:flex;flex-wrap:wrap;gap:12px;font-size:11px;color:var(--text-muted);margin-bottom:8px">${legend}</div>
+    ${renderWeeklySplitCard()}
     ${redModeBox}
     ${Object.entries(GROUPS).map(([group,muscles])=>`
       <div class="card">
@@ -2254,6 +2293,7 @@ function attachEvents(){
     b.addEventListener('input',()=>{ const m=b.dataset.planMuscle, v=parseInt(b.value)||0; const map=state.planTargets[state.goal]||(state.planTargets[state.goal]={}); if(v>0) map[m]=v; else delete map[m]; schedulePlanSave(); });
     b.addEventListener('change',()=>render());
   });
+  document.querySelectorAll('[data-splitday]').forEach(b=>b.addEventListener('click',()=>showSplitDayModal(parseInt(b.dataset.splitday))));
   document.querySelectorAll('.pr-card').forEach(b=>b.addEventListener('click',()=>showPRModal(b.dataset.pr)));
 
   el('export-csv',exportAllCSV);
