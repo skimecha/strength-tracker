@@ -138,7 +138,7 @@ select:focus,input:focus{outline:none;border-color:var(--accent)}
 .toggle-opt.active{background:var(--accent);color:#fff}
 .select{appearance:none;-webkit-appearance:none;background-color:var(--surface2);background-image:url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='12'%20height='12'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='%23808aa0'%20stroke-width='2.5'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Cpolyline%20points='6%209%2012%2015%2018%209'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 12px center;border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);font-size:16px;padding:11px 34px 11px 14px;width:100%;cursor:pointer}
 .muscle-grid{display:grid;grid-template-columns:1fr 1fr;gap:9px}
-.muscle-btn{background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:14px 10px;text-align:center;font-size:14px;font-weight:700;color:var(--text);cursor:pointer;transition:border-color .15s,background .15s}
+.muscle-btn{position:relative;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:14px 10px;text-align:center;font-size:14px;font-weight:700;color:var(--text);cursor:pointer;transition:border-color .15s,background .15s}
 .muscle-btn:active{border-color:var(--accent);background:var(--accent-dim)}
 .mbtn-bar{height:5px;border-radius:3px;background:var(--border);overflow:hidden;margin-top:8px}
 .exercise-list{display:flex;flex-direction:column;gap:8px}
@@ -406,7 +406,7 @@ async function deleteTicket(id){
   await loadSupportTickets(true); toast('Ticket deleted'); render();
 }
 
-const APP_VERSION = '2.38.0';
+const APP_VERSION = '2.38.1';
 const OWNER_UID     = '031a65ed-f52d-4a67-b271-47778e920c22';
 // Invite code from the URL (?invite=CODE) — drives the invite-only signup flow.
 let pendingInvite = new URLSearchParams(location.search).get('invite');
@@ -1768,7 +1768,8 @@ let _planSaveTimer=null;
 // the Workout screen's group and muscle buttons.
 function todayTargets(){ return state.weeklySplit[new Date().getDay()]||[]; }
 function splitNextDay(){ const t=new Date().getDay(); for(let i=1;i<=7;i++){ const d=(t+i)%7; if((state.weeklySplit[d]||[]).length) return d; } return null; }
-function targetDot(){ return '<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--green);margin-left:6px;box-shadow:0 0 5px var(--green);vertical-align:middle"></span>'; }
+// Solid dot pinned to the button's top-right corner (.muscle-btn is relative).
+function targetDot(){ return '<span style="position:absolute;top:8px;right:8px;width:9px;height:9px;border-radius:50%;background:var(--green)"></span>'; }
 function renderWeeklySplitCard(){
   const today=new Date().getDay();
   return `<div class="card" style="margin-bottom:8px"><div class="card-title">Weekly Split — Day Targets</div>
