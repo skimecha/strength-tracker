@@ -406,7 +406,7 @@ async function deleteTicket(id){
   await loadSupportTickets(true); toast('Ticket deleted'); render();
 }
 
-const APP_VERSION = '2.39.0';
+const APP_VERSION = '2.39.1';
 const OWNER_UID     = '031a65ed-f52d-4a67-b271-47778e920c22';
 // Invite code from the URL (?invite=CODE) — drives the invite-only signup flow.
 let pendingInvite = new URLSearchParams(location.search).get('invite');
@@ -1067,7 +1067,7 @@ function renderWorkoutScreen(){
       <div class="card-title" style="margin-bottom:10px">Cardio</div>
       <div class="muscle-grid">${CARDIO_ACTIVITIES.map(a=>`<button class="muscle-btn" data-activity="${a}">${a}</button>`).join('')}</div>
     </div>`}
-    ${hasSets&&!state.splitPicking?`<button class="btn btn-green btn-full" id="finish-from-workout">✓ Finish & Save</button>`:''}`;
+    ${hasSets&&!state.splitPicking?`<button class="btn btn-outline btn-full" id="finish-from-workout">✓ Finish & Save Workout</button>`:''}`;
 }
 
 function renderGroupMuscleSelect(){
@@ -1213,8 +1213,8 @@ function renderSets(){
     <button class="btn btn-primary btn-full" id="log-set">+ Log Set</button>
     ${renderTimer()}
     <hr class="divider">
-    <div class="btn-grid"><button class="btn btn-outline" id="next-exercise">${state.split?'✓ Log Super Set':'Next Exercise'}</button><button class="btn btn-outline" id="new-muscle">New Muscle</button></div>
-    <button class="btn btn-green" id="finish-workout">✓ Finish & Save</button>
+    <div class="btn-grid"><button class="btn btn-amber" id="next-exercise">${state.split?'✓ Log Super Set':'Next Exercise'}</button><button class="btn btn-green" id="new-muscle">New Muscle</button></div>
+    <button class="btn btn-outline btn-full" id="finish-workout">✓ Finish & Save Workout</button>
     <button class="btn btn-danger btn-sm btn-full" id="cancel-workout">Cancel Workout</button>
     ${renderExerciseHistory(state.selectedExercise)}`;
 }
@@ -1275,7 +1275,7 @@ function renderCardioLog(){
     </div>
     <button class="btn btn-green btn-full" id="log-cardio">✓ Log Activity</button>
     <hr class="divider">
-    <button class="btn btn-green" id="finish-workout">✓ Finish & Save</button>
+    <button class="btn btn-outline btn-full" id="finish-workout">✓ Finish & Save Workout</button>
     <button class="btn btn-danger btn-sm btn-full" id="cancel-workout">Cancel Workout</button>`;
 }
 
