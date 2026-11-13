@@ -406,7 +406,7 @@ async function deleteTicket(id){
   await loadSupportTickets(true); toast('Ticket deleted'); render();
 }
 
-const APP_VERSION = '2.38.2';
+const APP_VERSION = '2.39.0';
 const OWNER_UID     = '031a65ed-f52d-4a67-b271-47778e920c22';
 // Invite code from the URL (?invite=CODE) — drives the invite-only signup flow.
 let pendingInvite = new URLSearchParams(location.search).get('invite');
@@ -495,7 +495,7 @@ let state = {
   macroGoals:{calories:2500,protein:180,carbs:250,fat:80},
   foodLog:[],mealFavorites:[],
   mealPrep:{meals:[],overrides:{}},mpStep:'week',mpWeekOff:0,mpDraft:null,
-  machinePhotos:{},weeklySplit:{},
+  machinePhotos:{},weeklySplit:{},adhOff:0,
   weightLog:[],
   weightUnit: localStorage.getItem('li_weight_unit') || 'lbs',
   theme: localStorage.getItem('li_theme') || 'light',
@@ -1882,6 +1882,85 @@ function renderPlanTab(){
       </div>`).join('')}
   `;
 }
+// ── Plan adherence (Weekly Split vs what was actually logged) ────────────────
+// A target is one (day, muscle) pair from the weekly split; it counts as
+// trained when at least one working set for that muscle was logged that day
+// (the in-progress workout counts too). Percentages only include days that
+// have already arrived, so a mid-week score is never dragged down by days
+// that haven't happened yet.
+function adhTrainedOn(dateKey){
+  const set=new Set();
+  const collect=s=>{ if(new Date(s.date).toLocaleDateString('en-US')!==dateKey) return; (s.exercises||[]).forEach(ex=>{ if(ex.type==='cardio') return; if((ex.sets||[]).some(x=>x.type==='working')) set.add(ex.muscle); }); };
+  state.sessions.forEach(collect);
+  if(state._currentSession) collect(state._currentSession);
+  return set;
+}
+function adhWeekStats(off){
+  const dates=mpWeekDates(off); const t0=new Date(); t0.setHours(0,0,0,0);
+  let planned=0,hit=0,missed=0,pending=0,bonus=0;
+  const days=dates.map(d=>{
+    const dk=mpDateKey(d);
+    const plan=state.weeklySplit[d.getDay()]||[];
+    const trained=adhTrainedOn(dk);
+    const isPast=d.getTime()<t0.getTime(), isToday=dk===mpDateKey(t0), arrived=d.getTime()<=t0.getTime();
+    const chips=plan.map(m=>{ const tr=trained.has(m); const st=tr?'hit':isPast?'missed':isToday?'pending':'future'; return {m,st}; });
+    const extras=[...trained].filter(m=>!plan.includes(m));
+    if(arrived){ planned+=plan.length; hit+=chips.filter(c=>c.st==='hit').length; missed+=chips.filter(c=>c.st==='missed').length; pending+=chips.filter(c=>c.st==='pending').length; bonus+=extras.length; }
+    return {d,dk,isToday,plan,chips,extras};
+  });
+  return {days,planned,hit,missed,pending,bonus,pct:planned>0?Math.round(hit/planned*100):null};
+}
+function renderAdherenceCard(){
+  if(!Object.keys(state.weeklySplit).length) return '';
+  const off=state.adhOff||0;
+  const s=adhWeekStats(off);
+  const dates=mpWeekDates(off);
+  const fmtD=d=>d.toLocaleDateString('en-US',{month:'short',day:'numeric'});
+  const chip=(label,st)=>{
+    const css=st==='hit'?'background:var(--green-dim);border:1px solid var(--green);color:var(--green)'
+      :st==='missed'?'background:var(--red-dim);border:1px solid var(--red);color:var(--red)'
+      :st==='pending'?'background:var(--surface);border:1px dashed var(--accent);color:var(--accent)'
+      :st==='bonus'?'background:var(--accent-dim);border:1px solid var(--accent);color:var(--accent)'
+      :'background:var(--surface);border:1px dashed var(--border);color:var(--text-muted)';
+    const pre=st==='hit'?'✓ ':st==='missed'?'✗ ':st==='bonus'?'+ ':'';
+    return `<span style="${css};border-radius:999px;padding:3px 9px;font-size:11px;font-weight:700;white-space:nowrap">${pre}${esc(label)}</span>`;
+  };
+  const trend=[-3,-2,-1,0].map(o=>{ const st=adhWeekStats(o); const mon=mpWeekDates(o)[0]; return {label:o===0?'this week':mon.toLocaleDateString('en-US',{month:'short',day:'numeric'}),pct:st.pct,cur:o===0}; });
+  return `<div class="card">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;gap:8px">
+      <div class="card-title" style="margin:0">Plan Adherence</div>
+      <div style="display:flex;align-items:center;gap:6px;flex-shrink:0">
+        <button class="btn btn-outline btn-xs" id="adh-prev" aria-label="Previous week">‹</button>
+        <div style="font-size:12px;font-weight:700">${fmtD(dates[0])} – ${fmtD(dates[6])}</div>
+        <button class="btn btn-outline btn-xs" id="adh-next" aria-label="Next week" ${off>=0?'disabled style="opacity:.4"':''}>›</button>
+      </div>
+    </div>
+    ${s.pct===null?`<div style="font-size:12px;color:var(--text-muted);margin-bottom:10px">No targets planned ${off<0?'that week':'this week yet'}.</div>`:`
+    <div style="display:flex;align-items:center;gap:14px;margin-bottom:10px">
+      <div style="font-size:34px;font-weight:900;color:${s.pct>=75?'var(--green)':s.pct>=50?'var(--amber)':'var(--red)'}">${s.pct}%</div>
+      <div style="flex:1;font-size:12px;color:var(--text-muted);line-height:1.6"><b style="color:var(--text)">${s.hit} of ${s.planned}</b> planned targets trained${off===0?' so far':''}${s.missed?` · ${s.missed} missed`:''}${s.pending?` · ${s.pending} still to go today`:''}${s.bonus?` · ${s.bonus} bonus`:''}</div>
+    </div>`}
+    <div class="section-gap">
+      ${s.days.map(day=>`<div style="display:flex;align-items:flex-start;gap:8px;${day.isToday?'background:var(--green-dim);border:1px solid var(--green);border-radius:var(--radius-sm);padding:6px 8px;margin:0 -8px':''}">
+        <div style="width:46px;font-size:12px;font-weight:800;color:${day.isToday?'var(--green)':'var(--text-muted)'};padding-top:3px;flex-shrink:0">${MP_DAY_NAME[day.d.getDay()]} ${day.d.getDate()}</div>
+        <div style="flex:1;display:flex;flex-wrap:wrap;gap:5px">${(day.plan.length||day.extras.length)?day.chips.map(c=>chip(c.m,c.st)).join('')+day.extras.map(m=>chip(m,'bonus')).join(''):`<span style="font-size:11px;color:var(--text-muted);font-weight:600;padding-top:3px">Rest</span>`}</div>
+      </div>`).join('')}
+    </div>
+    <div style="font-size:10px;color:var(--text-muted);line-height:1.6;border-top:1px solid var(--surface2);padding-top:8px;margin-top:10px">✓ trained as planned · ✗ missed · dashed = still ahead · + = off-plan bonus (never counted against you)</div>
+    <div style="margin-top:12px">
+      <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:var(--text-muted);margin-bottom:10px">4-Week Trend</div>
+      <div style="display:flex;align-items:flex-end;gap:14px;height:84px;padding:0 8px">
+        ${trend.map(t=>`<div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:4px;height:100%;justify-content:flex-end">
+          <div style="font-size:11px;font-weight:800;color:${t.cur?'var(--green)':'var(--text-muted)'}">${t.pct===null?'–':t.pct+'%'}</div>
+          <div style="width:100%;height:${t.pct===null?2:Math.max(4,Math.round(t.pct*0.56))}px;background:${t.pct===null?'var(--border)':(t.pct>=75?'var(--green)':'var(--amber)')};border-radius:4px 4px 0 0;${t.cur?'opacity:.6':''}"></div>
+          <div style="font-size:9px;color:${t.cur?'var(--green)':'var(--text-muted)'};font-weight:700">${t.label}</div>
+        </div>`).join('')}
+      </div>
+      <div style="font-size:10px;color:var(--text-muted);margin-top:8px">Only days that have already happened count, so the current week can't look bad mid-week.</div>
+    </div>
+  </div>`;
+}
+
 function renderVolumeTab(){
   const period=state.volumePeriod, now=Date.now();
   const opts=[['week','This week'],['7d','7 days'],['14d','14 days'],['1m','1 month']];
@@ -1892,6 +1971,7 @@ function renderVolumeTab(){
   const maxVol=rows.length?rows[0][1].volume:0;
   const totalVol=rows.reduce((a,r)=>a+r[1].volume,0), totalSets=rows.reduce((a,r)=>a+r[1].sets,0);
   return `
+    ${renderAdherenceCard()}
     <div style="display:flex;gap:6px;overflow-x:auto;padding-bottom:2px;flex-shrink:0">
       ${opts.map(([v,l])=>`<button class="period-btn ${period===v?'active':''}" onclick="state.volumePeriod='${v}';render()">${l}</button>`).join('')}
     </div>
@@ -2296,6 +2376,8 @@ function attachEvents(){
   });
   document.querySelectorAll('[data-splitday]').forEach(b=>b.addEventListener('click',()=>showSplitDayModal(parseInt(b.dataset.splitday))));
   document.querySelectorAll('.pr-card').forEach(b=>b.addEventListener('click',()=>showPRModal(b.dataset.pr)));
+  el('adh-prev',()=>{ state.adhOff=(state.adhOff||0)-1; render(); });
+  el('adh-next',()=>{ if((state.adhOff||0)<0){ state.adhOff++; render(); } });
 
   el('export-csv',exportAllCSV);
   el('logout-btn',handleLogout);
