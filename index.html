@@ -406,7 +406,7 @@ async function deleteTicket(id){
   await loadSupportTickets(true); toast('Ticket deleted'); render();
 }
 
-const APP_VERSION = '2.38.1';
+const APP_VERSION = '2.38.2';
 const OWNER_UID     = '031a65ed-f52d-4a67-b271-47778e920c22';
 // Invite code from the URL (?invite=CODE) — drives the invite-only signup flow.
 let pendingInvite = new URLSearchParams(location.search).get('invite');
@@ -2169,7 +2169,7 @@ function attachEvents(){
     const sp=state.split; if(!sp) return;
     const i=parseInt(b.dataset.splitchip); if(!sp[i]||i===state.splitIdx) return;
     syncActiveSplit();
-    state.splitIdx=i; state.selectedMuscle=sp[i].muscle; state.selectedExercise=sp[i].name; state.pendingSets=[...sp[i].sets];
+    splitApplyEntry(i);
     render();
   }));
 
@@ -2402,7 +2402,34 @@ function attachEvents(){
 // ACTIVE exercise's sets live in state.pendingSets (source of truth) and are
 // parked into its split entry whenever you hop exercises. On commit, each
 // exercise saves as its own session entry, so history/PRs/volume are unchanged.
-function syncActiveSplit(){ if(state.split&&state.split[state.splitIdx]){ state.split[state.splitIdx].sets=[...state.pendingSets]; state.split[state.splitIdx].machine=state.machine; } }
+// Each Super Set entry remembers its own logging controls (weight, reps,
+// increments, set type, effort, loading, machine), so switching exercises
+// mid-superset never carries one exercise's settings onto the other.
+function syncActiveSplit(){
+  if(!(state.split&&state.split[state.splitIdx])) return;
+  const en=state.split[state.splitIdx];
+  en.sets=[...state.pendingSets];
+  en.machine=state.machine;
+  en.ui={weight:state.weight,reps:state.reps,weightInc:state.weightInc,repsInc:state.repsInc,setType:state.setType,effort:state.effort,loadMode:state.loadMode,unit:state.liftUnit};
+}
+function splitApplyEntry(i){
+  const en=state.split[i]; if(!en) return;
+  state.splitIdx=i; state.selectedMuscle=en.muscle; state.selectedExercise=en.name;
+  state.pendingSets=[...en.sets];
+  state.machine=en.machine||1;
+  const u=en.ui;
+  if(u){
+    state.weight=u.weight; state.reps=u.reps;
+    if(u.weightInc) state.weightInc=u.weightInc;
+    if(u.repsInc) state.repsInc=u.repsInc;
+    if(u.setType) state.setType=u.setType;
+    state.effort=u.effort||'std';
+    state.loadMode=u.loadMode||'bi';
+    // Snapshot taken under the other display unit? Convert so the physical
+    // weight is preserved (same math as the lbs/kg toggle).
+    if(u.unit&&u.unit!==state.liftUnit){ state.weight=state.liftUnit==='kg'?Math.round(u.weight*0.453592*2)/2:Math.round(u.weight*2.20462); }
+  }
+}
 function startSplitPick(){
   if(!state.split){ state.split=[{muscle:state.selectedMuscle,name:state.selectedExercise,sets:[...state.pendingSets],machine:state.machine}]; state.splitIdx=0; }
   else syncActiveSplit();
@@ -2413,10 +2440,7 @@ function splitAddOrSwitch(name){
   syncActiveSplit();
   let i=sp.findIndex(e=>e.name===name);
   if(i<0){ sp.push({muscle:state.selectedMuscle,name,sets:[],machine:1}); i=sp.length-1; }
-  state.splitIdx=i;
-  state.selectedMuscle=sp[i].muscle; state.selectedExercise=sp[i].name;
-  state.pendingSets=[...sp[i].sets];
-  state.machine=sp[i].machine||1;
+  splitApplyEntry(i);
   state.splitPicking=false;
 }
 function commitExercise(){
