@@ -406,7 +406,7 @@ async function deleteTicket(id){
   await loadSupportTickets(true); toast('Ticket deleted'); render();
 }
 
-const APP_VERSION = '2.39.1';
+const APP_VERSION = '2.40.0';
 const OWNER_UID     = '031a65ed-f52d-4a67-b271-47778e920c22';
 // Invite code from the URL (?invite=CODE) — drives the invite-only signup flow.
 let pendingInvite = new URLSearchParams(location.search).get('invite');
@@ -1361,7 +1361,8 @@ function hrCancelTest(){ if(state.cardio.hrTestInterval){ clearInterval(state.ca
 function logCardioActivity(){
   const distInput=document.getElementById('cardio-distance');
   const dist=distInput?parseFloat(distInput.value)||null:null;
-  const entry={type:'cardio',name:state.cardio.activity,duration:state.cardio.stopwatch.elapsed,distance:dist,distUnit:state.cardio.distUnit,heartRate:state.cardio.heartRate};
+  // t = when the cardio entry was saved (≈ its end); its start is t − duration.
+  const entry={type:'cardio',name:state.cardio.activity,duration:state.cardio.stopwatch.elapsed,distance:dist,distUnit:state.cardio.distUnit,heartRate:state.cardio.heartRate,t:Date.now()};
   if(!state._currentSession) state._currentSession={id:uid(),date:Date.now(),exercises:[]};
   state._currentSession.exercises.push(entry);
   swStop();
@@ -2301,7 +2302,8 @@ function attachEvents(){
   el('timer-cancel',()=>{ timerStop(false); updateTimerDOM(); });
 
   el('log-set',()=>{
-    const set={type:state.setType,weight:liftToLbs(state.weight),reps:state.reps};
+    // t = when the set was logged (epoch ms); powers session-duration analysis in exports.
+    const set={type:state.setType,weight:liftToLbs(state.weight),reps:state.reps,t:Date.now()};
     // Effort applies to working sets only; 'std' is implicit (absent), so sets
     // logged before v2.32.0 and effort-stamped ones share one shape.
     if(state.setType==='working'&&state.effort!=='std') set.effort=state.effort;
@@ -2613,23 +2615,49 @@ function resumeSession(sessionId){
 }
 
 // ─── EXPORT ───────────────────────────────────────────────────────────────────
+// Local wall-clock timestamp, sortable and spreadsheet-friendly: "2026-11-16 18:42:07".
+function fmtLocalTs(ms){ if(!ms) return ''; const d=new Date(ms), p=n=>String(n).padStart(2,'0'); return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`; }
+// Session timing from per-set / per-cardio timestamps (logged from v2.40.0 on).
+// Start = earliest set logged (or cardio start = save time − duration); end =
+// latest set or cardio save. Sessions from before v2.40.0 have no timestamps.
+function sessionTiming(s){
+  const ts=[];
+  (s.exercises||[]).forEach(ex=>{
+    if(ex.type==='cardio'){ if(ex.t){ ts.push(ex.t); ts.push(ex.t-(ex.duration||0)*1000); } return; }
+    (ex.sets||[]).forEach(x=>{ if(x.t) ts.push(x.t); });
+  });
+  if(!ts.length) return null;
+  const start=Math.min(...ts), end=Math.max(...ts);
+  return {start,end,minutes:Math.round((end-start)/60000)};
+}
 function exportAllCSV(){ try{
   const date=new Date().toISOString().slice(0,10);
   const rows=[]; const blank=['','','','','','',''];
   rows.push(['WORKOUTS','','','','','','']);
-  rows.push(['Date','Muscle Group','Exercise','Set Type','Set #','Weight (lbs)','Reps','Effort','Loading','Machine']);
-  const cardio=[];
-  state.sessions.forEach(s=>{ const d=new Date(s.date).toLocaleDateString('en-US'); s.exercises.forEach(ex=>{
+  rows.push(['Date','Muscle Group','Exercise','Set Type','Set #','Weight (lbs)','Reps','Effort','Loading','Machine','Logged At','Session ID']);
+  const cardio=[], summary=[];
+  state.sessions.forEach(s=>{ const d=new Date(s.date).toLocaleDateString('en-US'); let working=0;
+    s.exercises.forEach(ex=>{
     // Cardio entries have no sets array — collect for their own section below.
-    if(ex.type==='cardio'){ cardio.push([d,ex.name,ex.duration?fmtDuration(ex.duration):'',ex.distance||'',ex.distance?ex.distUnit:'',ex.heartRate||'','']); return; }
+    if(ex.type==='cardio'){ cardio.push([d,ex.name,ex.duration?fmtDuration(ex.duration):'',ex.distance||'',ex.distance?ex.distUnit:'',ex.heartRate||'',ex.t?fmtLocalTs(ex.t-(ex.duration||0)*1000):'',fmtLocalTs(ex.t),s.id]); return; }
     if(!Array.isArray(ex.sets)) return;
-    let wu=0,wk=0; ex.sets.forEach(set=>{ if(set.type==='warmup') wu++; else wk++; rows.push([d,ex.muscle,ex.name,set.type,set.type==='warmup'?wu:wk,set.weight,set.reps,set.effort==='f'?'Failure':set.effort==='nf'?'Near Failure':'',set.uni?'Unilateral':'',(ex.machine||1)>1?'M'+ex.machine:'']); });
-  }); });
+    let wu=0,wk=0; ex.sets.forEach(set=>{ if(set.type==='warmup') wu++; else { wk++; working++; } rows.push([d,ex.muscle,ex.name,set.type,set.type==='warmup'?wu:wk,set.weight,set.reps,set.effort==='f'?'Failure':set.effort==='nf'?'Near Failure':'',set.uni?'Unilateral':'',(ex.machine||1)>1?'M'+ex.machine:'',fmtLocalTs(set.t),s.id]); });
+    });
+    const tm=sessionTiming(s);
+    summary.push([d,tm?fmtLocalTs(tm.start):'',tm?fmtLocalTs(tm.end):'',tm?tm.minutes:'',(s.exercises||[]).length,working,s.id]);
+  });
   if(cardio.length){
     rows.push(blank);
     rows.push(['CARDIO','','','','','','']);
-    rows.push(['Date','Activity','Duration','Distance','Unit','Heart Rate (bpm)','']);
+    rows.push(['Date','Activity','Duration','Distance','Unit','Heart Rate (bpm)','Started At','Ended At','Session ID']);
     cardio.forEach(r=>rows.push(r));
+  }
+  if(summary.length){
+    rows.push(blank);
+    rows.push(['SESSIONS','','','','','','']);
+    rows.push(['Date','Start','End','Duration (min)','Exercises','Working Sets','Session ID']);
+    summary.forEach(r=>rows.push(r));
+    rows.push(['Start/End come from per-set timestamps, recorded from v2.40.0 on; earlier sessions have none. Duration runs from the first logged set (or cardio start) to the last.','','','','','','']);
   }
   rows.push(blank);
   rows.push(['PERSONAL RECORDS','','','','','','']);
