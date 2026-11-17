@@ -406,7 +406,7 @@ async function deleteTicket(id){
   await loadSupportTickets(true); toast('Ticket deleted'); render();
 }
 
-const APP_VERSION = '2.42.1';
+const APP_VERSION = '2.42.2';
 const OWNER_UID     = '031a65ed-f52d-4a67-b271-47778e920c22';
 // Invite code from the URL (?invite=CODE) — drives the invite-only signup flow.
 let pendingInvite = new URLSearchParams(location.search).get('invite');
@@ -1214,10 +1214,10 @@ function renderSets(){
       <div style="font-size:11px;color:var(--text-muted);margin-top:6px">One side = each arm/leg moved the full weight on its own (e.g. single-arm pulldown)</div></div>
     </div>
     ${state.pendingSets.length?`<div class="card"><div class="card-title">Logged Sets</div><div class="section-gap">${state.pendingSets.map((s,i)=>`<div class="set-row"><div class="set-badge ${s.type}">${s.type==='warmup'?'WU':'W'+workingIdx(i)}</div><div class="set-info">${fmtLift(s.weight)} × ${s.reps} reps</div>${effTag(s)}<button class="set-del" data-del="${i}">✕</button></div>`).join('')}</div></div>`:''}
-    <button class="btn btn-primary btn-full" id="log-set">+ Log Set</button>
+    <button class="btn btn-green btn-full" id="log-set">+ Log Set</button>
     ${renderTimer()}
     <hr class="divider">
-    <div class="btn-grid"><button class="btn btn-amber" id="next-exercise">${state.split?'✓ Log Super Set':'Next Exercise'}</button><button class="btn btn-green" id="new-muscle">New Muscle</button></div>
+    <div class="btn-grid"><button class="btn btn-amber" id="next-exercise">${state.split?'✓ Log Super Set':'Next Exercise'}</button><button class="btn btn-primary" id="new-muscle">New Muscle</button></div>
     <button class="btn btn-outline btn-full" id="finish-workout">✓ Finish & Save Workout</button>
     <button class="btn btn-danger btn-sm btn-full" id="cancel-workout">Cancel Workout</button>
     ${renderExerciseHistory(state.selectedExercise)}`;
