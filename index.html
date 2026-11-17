@@ -406,7 +406,7 @@ async function deleteTicket(id){
   await loadSupportTickets(true); toast('Ticket deleted'); render();
 }
 
-const APP_VERSION = '2.41.1';
+const APP_VERSION = '2.42.0';
 const OWNER_UID     = '031a65ed-f52d-4a67-b271-47778e920c22';
 // Invite code from the URL (?invite=CODE) — drives the invite-only signup flow.
 let pendingInvite = new URLSearchParams(location.search).get('invite');
@@ -496,7 +496,7 @@ let state = {
   foodLog:[],mealFavorites:[],
   mealPrep:{meals:[],overrides:{}},mpStep:'week',mpWeekOff:0,mpDraft:null,
   machinePhotos:{},weeklySplit:{},adhOff:0,
-  measurements:[],bodyView:'weight',measUnit:localStorage.getItem('li_meas_unit')||'in',measChartSite:'waist',measRange:'3M',
+  measurements:[],bodyView:'weight',bodyProfile:{},measUnit:localStorage.getItem('li_meas_unit')||'in',measChartSite:'waist',measRange:'3M',
   weightLog:[],
   weightUnit: localStorage.getItem('li_weight_unit') || 'lbs',
   theme: localStorage.getItem('li_theme') || 'light',
@@ -538,7 +538,7 @@ function resetAppState(){
   state.foodLog=[]; state.mealFavorites=[]; state.weightLog=[];
   state.mealPrep={meals:[],overrides:{}}; state.mpDraft=null; state.mpStep='week'; state.mpWeekOff=0;
   state.machinePhotos={}; Object.keys(_machinePhotoFetched).forEach(k=>delete _machinePhotoFetched[k]);
-  state.measurements=[]; state.bodyView='weight';
+  state.measurements=[]; state.bodyView='weight'; state.bodyProfile={};
   state.macroGoals={calories:2500,protein:180,carbs:250,fat:80};
   state.logStep='type'; state._currentSession=null; state._resumedSnapshot=null; state.pendingSets=[]; state.view='log';
   state.split=null; state.splitIdx=0; state.splitPicking=false;
@@ -580,7 +580,7 @@ async function loadUserData(){
     state.favorites     = (ef.data|| []).map(r=>r.exercise);
     state.customExercises = ce.data || [];
     // Plan targets — loaded separately so a missing table never aborts the main data load.
-    try{ const pg=await sb.from('plan_targets').select('targets').eq('user_id',userId).maybeSingle(); const raw=(pg.data&&pg.data.targets)||{}; state.weeklySplit=(raw.split&&typeof raw.split==='object'&&!Array.isArray(raw.split))?raw.split:{}; delete raw.split; state.planTargets=(raw.hypertrophy||raw.strength)?{hypertrophy:raw.hypertrophy||{},strength:raw.strength||{}}:{hypertrophy:raw,strength:{}}; }catch(e){ state.planTargets={hypertrophy:{},strength:{}}; state.weeklySplit={}; }
+    try{ const pg=await sb.from('plan_targets').select('targets').eq('user_id',userId).maybeSingle(); const raw=(pg.data&&pg.data.targets)||{}; state.weeklySplit=(raw.split&&typeof raw.split==='object'&&!Array.isArray(raw.split))?raw.split:{}; delete raw.split; state.bodyProfile=(raw.profile&&typeof raw.profile==='object'&&!Array.isArray(raw.profile))?raw.profile:{}; delete raw.profile; state.planTargets=(raw.hypertrophy||raw.strength)?{hypertrophy:raw.hypertrophy||{},strength:raw.strength||{}}:{hypertrophy:raw,strength:{}}; }catch(e){ state.planTargets={hypertrophy:{},strength:{}}; state.weeklySplit={}; state.bodyProfile={}; }
     await loadDevNotes();  // separate so a missing dev_notes table never aborts the main load
     // Per-exercise settings (assisted flag). Isolated so a missing table never aborts the load.
     try{ const es=await sb.from('exercise_settings').select('exercise,assisted').eq('user_id',userId); if(!es.error&&Array.isArray(es.data)){ const m={}; es.data.forEach(r=>{ m[r.exercise]={assisted:!!r.assisted}; }); state.exerciseSettings=m; } }catch(e){ state.exerciseSettings={}; }
@@ -1697,6 +1697,72 @@ function measLineChart(pts,fmt){
     <text x="${W-R}" y="${H-6}" text-anchor="end" font-size="9" fill="var(--text-muted)" font-family="system-ui">${fmtDateShort(t1)}</text>
   </svg>`;
 }
+// ── Body-fat estimate ────────────────────────────────────────────────────────
+// Two tape methods (all inputs in inches; the ratios make units cancel for RFM):
+//  • Navy (Hodgdon & Beckett 1984): men waist+neck+height; women add hips.
+//    Neck is a fitted term — it can't simply be dropped from this formula.
+//  • RFM, Relative Fat Mass (Woolcott & Bergman 2018): waist+height only,
+//    validated against DEXA; immune to neck growth from trap/shrug work.
+// Both are typically within ~3–4 points of DEXA; the trend is the useful part.
+// Height/sex/method live in plan_targets.targets.profile (no extra table).
+function bfEstimate(m){
+  const p=state.bodyProfile||{}, h=+p.heightIn, d=(m&&m.data)||{};
+  if(!(h>0)||!p.sex) return null;
+  let v=null;
+  if((p.bfMethod||'navy')==='rfm'){ if(d.waist>0) v=(p.sex==='f'?76:64)-20*h/d.waist; }
+  else if(p.sex==='f'){ const x=(d.waist||0)+(d.hips||0)-(d.neck||0); if(d.waist&&d.hips&&d.neck&&x>0) v=163.205*Math.log10(x)-97.684*Math.log10(h)-78.387; }
+  else if(d.waist&&d.neck&&d.waist>d.neck){ v=86.010*Math.log10(d.waist-d.neck)-70.041*Math.log10(h)+36.76; }
+  return v==null||!isFinite(v)?null:Math.max(2,Math.min(60,v));
+}
+function bfHistory(){ return measSorted().map(m=>({date:m.date,v:bfEstimate(m)})).filter(x=>x.v!=null); }
+// Body weight (lbs) logged closest to a date, within a week either side.
+function weightNearLbs(date){ let best=null; (state.weightLog||[]).forEach(e=>{ const dd=Math.abs(e.date-date); if(dd<=7*864e5&&(!best||dd<best.dd)) best={dd,date:e.date,lbs:e.unit==='kg'?parseFloat(kgToLbs(e.value)):+e.value}; }); return best; }
+function renderBodyFatCard(){
+  const p=state.bodyProfile||{};
+  if(!(p.heightIn>0)||!p.sex) return `<div class="card"><div class="card-title">Body Fat Estimate</div><div style="font-size:12px;color:var(--text-muted);line-height:1.5;margin-bottom:10px">Add your height and sex once to estimate body fat from your tape measurements.</div><button class="btn btn-outline btn-full" id="bf-profile">Set height &amp; sex</button></div>`;
+  const meth=p.bfMethod||'navy', hist=bfHistory(), cur=hist[hist.length-1], prev=hist[hist.length-2];
+  const need=meth==='rfm'?'a waist measurement':p.sex==='f'?'waist, hips and neck on the same check-in':'waist and neck on the same check-in';
+  let mass='';
+  if(cur){ const w=weightNearLbs(cur.date); if(w){ const fat=w.lbs*cur.v/100, lean=w.lbs-fat; const f=x=>state.weightUnit==='kg'?lbsToKg(x)+' kg':Math.round(x)+' lbs';
+    mass=`<div style="font-size:12px;color:var(--text-muted);margin-top:8px;line-height:1.5">≈ <b style="color:var(--text)">${f(fat)}</b> fat · <b style="color:var(--text)">${f(lean)}</b> lean, using your ${fmtDateShort(w.date)} weigh-in</div>`; } }
+  return `<div class="card"><div class="card-title">Body Fat Estimate</div>
+    <div class="toggle-group" style="margin-bottom:10px"><div class="toggle-opt ${meth==='navy'?'active':''}" data-bfmethod="navy" style="font-size:12px;padding:8px 0">Navy (waist + neck)</div><div class="toggle-opt ${meth==='rfm'?'active':''}" data-bfmethod="rfm" style="font-size:12px;padding:8px 0">Waist only (RFM)</div></div>
+    ${cur?`<div style="display:flex;align-items:baseline;gap:10px"><div style="font-size:36px;font-weight:900">~${cur.v.toFixed(1)}%</div><div style="font-size:12px;color:var(--text-muted)">± ~4 pts</div>
+      ${prev?`<div style="margin-left:auto;font-size:12px;font-weight:800;color:${cur.v<=prev.v?'var(--green)':'var(--amber)'}">${cur.v<=prev.v?'▼':'▲'} ${Math.abs(cur.v-prev.v).toFixed(1)} since ${fmtDateShort(prev.date)}</div>`:''}</div>
+      ${mass}
+      ${hist.length>=2?`<div style="margin-top:10px">${measLineChart(hist,v=>v.toFixed(0)+'%')}</div>`:''}`
+    :`<div style="font-size:12px;color:var(--text-muted);line-height:1.5">This method needs ${need}. Log a check-in with ${meth==='rfm'?'your waist':'those'} to see an estimate.</div>`}
+    <div style="font-size:10px;color:var(--text-muted);line-height:1.6;margin-top:10px">Tape-based estimate, typically within 3–4 points of a DEXA scan; most useful as a trend. The two methods can disagree by several points, so pick one and stick with it. Navy can read low for lifters whose necks grow from trap work; RFM ignores neck.</div>
+    <div style="text-align:right;margin-top:6px"><button class="btn btn-outline btn-xs" id="bf-profile">Edit height &amp; sex</button></div>
+  </div>`;
+}
+function showBodyProfileModal(){
+  const p={...(state.bodyProfile||{})}; let sex=p.sex||'';
+  const cm=measUnit()==='cm', h=+p.heightIn||0;
+  const rerender=()=>{
+    document.getElementById('modal-root').innerHTML=`<div class="modal-overlay" id="modal-overlay"><div class="modal">
+      <div class="modal-title">Height &amp; Sex</div>
+      <div style="font-size:12px;color:var(--text-muted);line-height:1.5;margin-bottom:10px">Used only for the body-fat estimate; the formulas differ by sex. Stored privately with your plan settings.</div>
+      <label>Sex</label>
+      <div class="toggle-group" style="margin-bottom:12px"><div class="toggle-opt ${sex==='m'?'active':''}" data-bpsex="m">Male</div><div class="toggle-opt ${sex==='f'?'active':''}" data-bpsex="f">Female</div></div>
+      <label>Height</label>
+      ${cm?`<div style="display:flex;align-items:center;gap:8px"><input type="number" id="bp-cm" inputmode="decimal" placeholder="e.g. 178" value="${h?(h*2.54).toFixed(0):''}" style="text-align:center"><span style="color:var(--text-muted);font-weight:700">cm</span></div>`
+        :`<div style="display:flex;align-items:center;gap:8px"><input type="number" id="bp-ft" inputmode="numeric" placeholder="5" value="${h?Math.floor(h/12):''}" style="text-align:center"><span style="color:var(--text-muted);font-weight:700">ft</span><input type="number" id="bp-in" inputmode="decimal" placeholder="10" value="${h?+(h%12).toFixed(1):''}" style="text-align:center"><span style="color:var(--text-muted);font-weight:700">in</span></div>`}
+      <div class="btn-grid" style="margin-top:14px"><button class="btn btn-outline" id="modal-cancel">Cancel</button><button class="btn btn-primary" id="bp-save">Save</button></div>
+    </div></div>`;
+    document.getElementById('modal-cancel').addEventListener('click',closeModal);
+    document.getElementById('modal-overlay').addEventListener('click',e=>{ if(e.target===e.currentTarget) closeModal(); });
+    document.querySelectorAll('[data-bpsex]').forEach(b=>b.addEventListener('click',()=>{ const keep=cm?{cm:document.getElementById('bp-cm').value}:{ft:document.getElementById('bp-ft').value,inch:document.getElementById('bp-in').value}; sex=b.dataset.bpsex; rerender(); if(cm) document.getElementById('bp-cm').value=keep.cm; else { document.getElementById('bp-ft').value=keep.ft; document.getElementById('bp-in').value=keep.inch; } }));
+    document.getElementById('bp-save').addEventListener('click',()=>{
+      const hi=cm?(parseFloat(document.getElementById('bp-cm').value)||0)/2.54:(parseFloat(document.getElementById('bp-ft').value)||0)*12+(parseFloat(document.getElementById('bp-in').value)||0);
+      if(!sex){ toast('Pick male or female','var(--red)'); return; }
+      if(!(hi>=48&&hi<=96)){ toast('Enter a height between 4 and 8 ft','var(--red)'); return; }
+      state.bodyProfile={...state.bodyProfile,sex,heightIn:+hi.toFixed(2)}; schedulePlanSave(); closeModal(); render(); toast('Saved');
+    });
+  };
+  rerender();
+}
+
 function renderMeasurements(){
   const u=measUnit(), on=measSitesOn();
   const sites=MEAS_SITES.filter(s=>on.includes(s.k)||measSiteHistory(s.k).length);
@@ -1711,6 +1777,7 @@ function renderMeasurements(){
       <div style="font-size:36px;font-weight:900">${rNow.v.toFixed(2)}</div>
       <div style="flex:1;font-size:12px;color:var(--text-muted);line-height:1.5">${rPrev?`<b style="color:${rNow.v>=rPrev.v?'var(--green)':'var(--amber)'}">${rNow.v>=rPrev.v?'▲':'▼'} ${Math.abs(rNow.v-rPrev.v).toFixed(2)}</b> since ${fmtDateShort(rPrev.date)}<br>`:''}Shoulders ÷ waist, from your ${fmtDateShort(rNow.date)} check-in</div>
     </div></div>`:''}
+    ${renderBodyFatCard()}
     ${ms.length?`<div class="card"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px"><div class="card-title" style="margin:0">Latest — ${fmtDateShort(last.date)}</div><div style="font-size:11px;color:var(--text-muted)">${u} · change vs previous</div></div>
       ${sites.map(s=>{ const h=measSiteHistory(s.k), c=h[h.length-1], p=h[h.length-2]; const d=c&&p?inToDisp(c.v)-inToDisp(p.v):null;
         return `<div data-meas-site="${s.k}" style="display:flex;align-items:center;width:100%;box-sizing:border-box;background:${chartSite.k===s.k?'var(--accent-dim)':'none'};border-bottom:1px solid var(--surface2);border-radius:6px;padding:9px 6px;cursor:pointer;color:var(--text)">
@@ -1925,7 +1992,7 @@ function showSplitDayModal(dow){
 }
 
 function schedulePlanSave(){ clearTimeout(_planSaveTimer); _planSaveTimer=setTimeout(dbSavePlan,600); }
-async function dbSavePlan(){ const {error}=await sb.from('plan_targets').upsert({user_id:currentUser.id,targets:{...state.planTargets,split:state.weeklySplit},updated_at:new Date().toISOString()},{onConflict:'user_id'}); if(error) toast('Could not save plan','var(--red)'); }
+async function dbSavePlan(){ const {error}=await sb.from('plan_targets').upsert({user_id:currentUser.id,targets:{...state.planTargets,split:state.weeklySplit,profile:state.bodyProfile},updated_at:new Date().toISOString()},{onConflict:'user_id'}); if(error) toast('Could not save plan','var(--red)'); }
 function volumeColor(n, goal){ goal=goal||state.goal; if(goal==='strength') return n>12?'var(--red)':n>=10?'#f97316':n>=6?'#eab308':'var(--accent)'; return n>20?'var(--red)':n>=18?'#f97316':n>=12?'#eab308':'var(--accent)'; }
 // Segmented progress bar — the filled portion is colored by which volume band
 // each slice of sets falls into (blue 0–12, gold 12–18, orange 18–20, red 20+,
@@ -2595,6 +2662,8 @@ function attachEvents(){
   document.querySelectorAll('[data-meas-site]').forEach(b=>b.addEventListener('click',()=>{ state.measChartSite=b.dataset.measSite; render(); }));
   document.querySelectorAll('[data-meas-range]').forEach(b=>b.addEventListener('click',()=>{ state.measRange=b.dataset.measRange; render(); }));
   el('meas-new',showMeasCheckInModal);
+  el('bf-profile',showBodyProfileModal);
+  document.querySelectorAll('[data-bfmethod]').forEach(b=>b.addEventListener('click',()=>{ state.bodyProfile={...state.bodyProfile,bfMethod:b.dataset.bfmethod}; schedulePlanSave(); render(); }));
   document.querySelectorAll('[data-del-meas]').forEach(b=>b.addEventListener('click',()=>{ if(!confirm('Delete this check-in?')) return; const id=b.dataset.delMeas; state.measurements=state.measurements.filter(m=>m.id!==id); render(); sb.from('body_measurements').delete().eq('id',id).eq('user_id',currentUser.id).then(null,()=>{}); toast('Check-in deleted'); }));
   if(state.view==='bodyweight'&&state.bodyView==='meas') bindMeasTips();
 
@@ -2798,8 +2867,9 @@ function exportAllCSV(){ try{
   rows.push(blank);
   if(state.measurements&&state.measurements.length){
     rows.push(['BODY MEASUREMENTS (inches)','','','','','','']);
-    rows.push(['Date',...MEAS_SITES.map(x=>x.l),'V-Taper Ratio']);
-    measSorted().forEach(m=>{ const d=m.data||{}; rows.push([fmtDate(m.date),...MEAS_SITES.map(x=>d[x.k]!=null?d[x.k]:''),d.shoulders&&d.waist?(d.shoulders/d.waist).toFixed(3):'']); });
+    const bfm=(state.bodyProfile&&state.bodyProfile.bfMethod)==='rfm'?'RFM':'Navy';
+    rows.push(['Date',...MEAS_SITES.map(x=>x.l),'V-Taper Ratio',`Est. Body Fat % (${bfm})`]);
+    measSorted().forEach(m=>{ const d=m.data||{}; rows.push([fmtDate(m.date),...MEAS_SITES.map(x=>d[x.k]!=null?d[x.k]:''),d.shoulders&&d.waist?(d.shoulders/d.waist).toFixed(3):'',(()=>{ const b=bfEstimate(m); return b==null?'':b.toFixed(1); })()]); });
     rows.push(blank);
   }
   rows.push(['BODY WEIGHT','','','','','','']);
