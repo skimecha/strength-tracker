@@ -406,7 +406,7 @@ async function deleteTicket(id){
   await loadSupportTickets(true); toast('Ticket deleted'); render();
 }
 
-const APP_VERSION = '2.42.0';
+const APP_VERSION = '2.42.1';
 const OWNER_UID     = '031a65ed-f52d-4a67-b271-47778e920c22';
 // Invite code from the URL (?invite=CODE) — drives the invite-only signup flow.
 let pendingInvite = new URLSearchParams(location.search).get('invite');
@@ -1733,35 +1733,46 @@ function renderBodyFatCard(){
       ${hist.length>=2?`<div style="margin-top:10px">${measLineChart(hist,v=>v.toFixed(0)+'%')}</div>`:''}`
     :`<div style="font-size:12px;color:var(--text-muted);line-height:1.5">This method needs ${need}. Log a check-in with ${meth==='rfm'?'your waist':'those'} to see an estimate.</div>`}
     <div style="font-size:10px;color:var(--text-muted);line-height:1.6;margin-top:10px">Tape-based estimate, typically within 3–4 points of a DEXA scan; most useful as a trend. The two methods can disagree by several points, so pick one and stick with it. Navy can read low for lifters whose necks grow from trap work; RFM ignores neck.</div>
-    <div style="text-align:right;margin-top:6px"><button class="btn btn-outline btn-xs" id="bf-profile">Edit height &amp; sex</button></div>
+    <div style="display:flex;align-items:center;justify-content:flex-end;gap:8px;margin-top:6px"><span style="font-size:11px;color:var(--text-muted)">${fmtHeight(p)} · ${p.sex==='f'?'Female':'Male'}</span><button class="btn btn-outline btn-xs" id="bf-profile">Edit height &amp; sex</button></div>
   </div>`;
 }
 function showBodyProfileModal(){
-  const p={...(state.bodyProfile||{})}; let sex=p.sex||'';
-  const cm=measUnit()==='cm', h=+p.heightIn||0;
+  const p={...(state.bodyProfile||{})};
+  let sex=p.sex||'';
+  let hu=p.heightUnit||(measUnit()==='cm'?'cm':'ftin');
+  let hIn=+p.heightIn||0;  // working value in inches, carried across unit switches
+  const readInches=()=>{
+    if(hu==='cm'){ const v=parseFloat(document.getElementById('bp-cm').value); return v>0?v/2.54:0; }
+    const ft=parseFloat(document.getElementById('bp-ft').value)||0, inch=parseFloat(document.getElementById('bp-in').value)||0;
+    return ft*12+inch;
+  };
   const rerender=()=>{
+    const ftV=hIn?Math.floor(Math.round(hIn*10)/10/12):'', inV=hIn?+(hIn-Math.floor(Math.round(hIn*10)/10/12)*12).toFixed(1):'', cmV=hIn?Math.round(hIn*2.54):'';
     document.getElementById('modal-root').innerHTML=`<div class="modal-overlay" id="modal-overlay"><div class="modal">
       <div class="modal-title">Height &amp; Sex</div>
       <div style="font-size:12px;color:var(--text-muted);line-height:1.5;margin-bottom:10px">Used only for the body-fat estimate; the formulas differ by sex. Stored privately with your plan settings.</div>
       <label>Sex</label>
       <div class="toggle-group" style="margin-bottom:12px"><div class="toggle-opt ${sex==='m'?'active':''}" data-bpsex="m">Male</div><div class="toggle-opt ${sex==='f'?'active':''}" data-bpsex="f">Female</div></div>
-      <label>Height</label>
-      ${cm?`<div style="display:flex;align-items:center;gap:8px"><input type="number" id="bp-cm" inputmode="decimal" placeholder="e.g. 178" value="${h?(h*2.54).toFixed(0):''}" style="text-align:center"><span style="color:var(--text-muted);font-weight:700">cm</span></div>`
-        :`<div style="display:flex;align-items:center;gap:8px"><input type="number" id="bp-ft" inputmode="numeric" placeholder="5" value="${h?Math.floor(h/12):''}" style="text-align:center"><span style="color:var(--text-muted);font-weight:700">ft</span><input type="number" id="bp-in" inputmode="decimal" placeholder="10" value="${h?+(h%12).toFixed(1):''}" style="text-align:center"><span style="color:var(--text-muted);font-weight:700">in</span></div>`}
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:5px"><label style="margin:0">Height</label>
+        <div class="toggle-group" style="width:auto;display:inline-flex;flex:0 0 auto"><div class="toggle-opt ${hu==='ftin'?'active':''}" data-bphu="ftin" style="padding:4px 12px;font-size:12px">Imperial (ft/in)</div><div class="toggle-opt ${hu==='cm'?'active':''}" data-bphu="cm" style="padding:4px 12px;font-size:12px">Metric (cm)</div></div></div>
+      ${hu==='cm'?`<div style="display:flex;align-items:center;gap:8px"><input type="number" id="bp-cm" inputmode="decimal" placeholder="e.g. 178" value="${cmV}" style="text-align:center"><span style="color:var(--text-muted);font-weight:700">cm</span></div>`
+        :`<div style="display:flex;align-items:center;gap:8px"><input type="number" id="bp-ft" inputmode="numeric" placeholder="5" value="${ftV}" style="text-align:center"><span style="color:var(--text-muted);font-weight:700">ft</span><input type="number" id="bp-in" inputmode="decimal" placeholder="10" value="${inV}" style="text-align:center"><span style="color:var(--text-muted);font-weight:700">in</span></div>`}
       <div class="btn-grid" style="margin-top:14px"><button class="btn btn-outline" id="modal-cancel">Cancel</button><button class="btn btn-primary" id="bp-save">Save</button></div>
     </div></div>`;
     document.getElementById('modal-cancel').addEventListener('click',closeModal);
     document.getElementById('modal-overlay').addEventListener('click',e=>{ if(e.target===e.currentTarget) closeModal(); });
-    document.querySelectorAll('[data-bpsex]').forEach(b=>b.addEventListener('click',()=>{ const keep=cm?{cm:document.getElementById('bp-cm').value}:{ft:document.getElementById('bp-ft').value,inch:document.getElementById('bp-in').value}; sex=b.dataset.bpsex; rerender(); if(cm) document.getElementById('bp-cm').value=keep.cm; else { document.getElementById('bp-ft').value=keep.ft; document.getElementById('bp-in').value=keep.inch; } }));
+    document.querySelectorAll('[data-bpsex]').forEach(b=>b.addEventListener('click',()=>{ hIn=readInches()||hIn; sex=b.dataset.bpsex; rerender(); }));
+    document.querySelectorAll('[data-bphu]').forEach(b=>b.addEventListener('click',()=>{ if(b.dataset.bphu===hu) return; hIn=readInches()||hIn; hu=b.dataset.bphu; rerender(); }));
     document.getElementById('bp-save').addEventListener('click',()=>{
-      const hi=cm?(parseFloat(document.getElementById('bp-cm').value)||0)/2.54:(parseFloat(document.getElementById('bp-ft').value)||0)*12+(parseFloat(document.getElementById('bp-in').value)||0);
+      const hi=readInches();
       if(!sex){ toast('Pick male or female','var(--red)'); return; }
-      if(!(hi>=48&&hi<=96)){ toast('Enter a height between 4 and 8 ft','var(--red)'); return; }
-      state.bodyProfile={...state.bodyProfile,sex,heightIn:+hi.toFixed(2)}; schedulePlanSave(); closeModal(); render(); toast('Saved');
+      if(!(hi>=48&&hi<=96)){ toast(hu==='cm'?'Enter a height between 122 and 244 cm':'Enter a height between 4 and 8 ft','var(--red)'); return; }
+      state.bodyProfile={...state.bodyProfile,sex,heightIn:+hi.toFixed(2),heightUnit:hu}; schedulePlanSave(); closeModal(); render(); toast('Saved');
     });
   };
   rerender();
 }
+function fmtHeight(p){ const h=+p.heightIn; if(!(h>0)) return ''; if(p.heightUnit==='cm') return Math.round(h*2.54)+' cm'; const r=Math.round(h); return `${Math.floor(r/12)}′${r%12}″`; }
 
 function renderMeasurements(){
   const u=measUnit(), on=measSitesOn();
