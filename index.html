@@ -406,7 +406,7 @@ async function deleteTicket(id){
   await loadSupportTickets(true); toast('Ticket deleted'); render();
 }
 
-const APP_VERSION = '2.41.0';
+const APP_VERSION = '2.41.1';
 const OWNER_UID     = '031a65ed-f52d-4a67-b271-47778e920c22';
 // Invite code from the URL (?invite=CODE) — drives the invite-only signup flow.
 let pendingInvite = new URLSearchParams(location.search).get('invite');
@@ -1658,17 +1658,17 @@ function sortedFavorites(){
 // data = {site: inches}. Canonical storage is inches; cm is display-only.
 // Blank fields are simply absent, so a waist-only check-in is valid.
 const MEAS_SITES=[
-  {k:'shoulders',l:'Shoulders',g:'upper'},
-  {k:'chest',l:'Chest',g:'upper'},
+  {k:'shoulders',l:'Shoulders',g:'upper',tip:'Around the widest point of your shoulders, over the outer delts, arms relaxed at your sides. Keep the tape level all the way around; a mirror or a helper makes this much easier. Measure at the end of a normal exhale.'},
+  {k:'chest',l:'Chest',g:'upper',tip:'Around the fullest part of your chest, across the nipple line and under the armpits, arms relaxed at your sides. Tape level across the back. Measure at the end of a normal exhale; don\'t puff up or flex.'},
   {k:'waist',l:'Waist',g:'upper',hint:'at navel',tip:'Measure at the navel, tape level all the way around (check it isn\'t dipping at the back). Stand relaxed and measure at the end of a normal exhale; don\'t suck in or flex. Use the same spot every time.'},
-  {k:'upperWaist',l:'Upper waist',g:'upper',hint:'narrowest point',opt:true},
-  {k:'armL',l:'Arm (L)',g:'upper',hint:'flexed'},
-  {k:'armR',l:'Arm (R)',g:'upper',hint:'flexed'},
-  {k:'forearm',l:'Forearm',g:'upper',opt:true},
-  {k:'neck',l:'Neck',g:'upper'},
-  {k:'hips',l:'Hips',g:'lower'},
-  {k:'thigh',l:'Thigh',g:'lower'},
-  {k:'calf',l:'Calf',g:'lower'},
+  {k:'upperWaist',l:'Upper waist',g:'upper',hint:'narrowest point',opt:true,tip:'At the narrowest point of your torso, usually a few inches above the navel and below the ribs. Stand relaxed, tape level, measured at the end of a normal exhale; don\'t suck in.'},
+  {k:'armL',l:'Arm (L)',g:'upper',hint:'flexed',tip:'Raise your left arm to shoulder height, bend the elbow about 90° and flex hard. Measure around the peak of the biceps, tape perpendicular to the arm. Use the same arm position every time.'},
+  {k:'armR',l:'Arm (R)',g:'upper',hint:'flexed',tip:'Raise your right arm to shoulder height, bend the elbow about 90° and flex hard. Measure around the peak of the biceps, tape perpendicular to the arm. Use the same arm position every time.'},
+  {k:'forearm',l:'Forearm',g:'upper',opt:true,tip:'Arm straight down at your side, fist clenched. Measure around the widest part of the forearm, just below the elbow, tape perpendicular to the arm.'},
+  {k:'neck',l:'Neck',g:'upper',tip:'Just below the Adam\'s apple, looking straight ahead with your neck relaxed (not flexed or tilted). Let the tape slope slightly down toward the front.'},
+  {k:'hips',l:'Hips',g:'lower',tip:'Around the widest part of your glutes, feet together, standing relaxed. Keep the tape level all the way around; check it in a mirror.'},
+  {k:'thigh',l:'Thigh',g:'lower',tip:'Stand with weight even on both feet, leg relaxed. Measure around the widest part of the thigh, just below the glute fold. Use the same leg every time.'},
+  {k:'calf',l:'Calf',g:'lower',tip:'Stand flat with weight even on both feet, calf relaxed (not up on your toes). Measure around the widest part of the calf. Use the same leg every time.'},
 ];
 function measSitesOn(){ try{ const s=JSON.parse(localStorage.getItem('li_meas_sites')||'null'); if(Array.isArray(s)&&s.length) return s; }catch(e){} return MEAS_SITES.filter(x=>!x.opt).map(x=>x.k); }
 function measUnit(){ return state.measUnit==='cm'?'cm':'in'; }
