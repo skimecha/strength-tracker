@@ -406,7 +406,7 @@ async function deleteTicket(id){
   await loadSupportTickets(true); toast('Ticket deleted'); render();
 }
 
-const APP_VERSION = '2.40.0';
+const APP_VERSION = '2.41.0';
 const OWNER_UID     = '031a65ed-f52d-4a67-b271-47778e920c22';
 // Invite code from the URL (?invite=CODE) — drives the invite-only signup flow.
 let pendingInvite = new URLSearchParams(location.search).get('invite');
@@ -496,6 +496,7 @@ let state = {
   foodLog:[],mealFavorites:[],
   mealPrep:{meals:[],overrides:{}},mpStep:'week',mpWeekOff:0,mpDraft:null,
   machinePhotos:{},weeklySplit:{},adhOff:0,
+  measurements:[],bodyView:'weight',measUnit:localStorage.getItem('li_meas_unit')||'in',measChartSite:'waist',measRange:'3M',
   weightLog:[],
   weightUnit: localStorage.getItem('li_weight_unit') || 'lbs',
   theme: localStorage.getItem('li_theme') || 'light',
@@ -537,6 +538,7 @@ function resetAppState(){
   state.foodLog=[]; state.mealFavorites=[]; state.weightLog=[];
   state.mealPrep={meals:[],overrides:{}}; state.mpDraft=null; state.mpStep='week'; state.mpWeekOff=0;
   state.machinePhotos={}; Object.keys(_machinePhotoFetched).forEach(k=>delete _machinePhotoFetched[k]);
+  state.measurements=[]; state.bodyView='weight';
   state.macroGoals={calories:2500,protein:180,carbs:250,fat:80};
   state.logStep='type'; state._currentSession=null; state._resumedSnapshot=null; state.pendingSets=[]; state.view='log';
   state.split=null; state.splitIdx=0; state.splitPicking=false;
@@ -584,6 +586,8 @@ async function loadUserData(){
     try{ const es=await sb.from('exercise_settings').select('exercise,assisted').eq('user_id',userId); if(!es.error&&Array.isArray(es.data)){ const m={}; es.data.forEach(r=>{ m[r.exercise]={assisted:!!r.assisted}; }); state.exerciseSettings=m; } }catch(e){ state.exerciseSettings={}; }
     // Meal Prep plan. Isolated so a missing meal_prep table never aborts the load.
     try{ const mp=await sb.from('meal_prep').select('data').eq('user_id',userId).maybeSingle(); const d=(mp.data&&mp.data.data)||{}; state.mealPrep={meals:Array.isArray(d.meals)?d.meals:[],overrides:(d.overrides&&typeof d.overrides==='object')?d.overrides:{}}; }catch(e){ state.mealPrep={meals:[],overrides:{}}; }
+    // Body measurements. Isolated so a missing table never aborts the load.
+    try{ const bm=await sb.from('body_measurements').select('id,date,data').eq('user_id',userId).order('date'); state.measurements=(!bm.error&&Array.isArray(bm.data))?bm.data:[]; }catch(e){ state.measurements=[]; }
     // Role (trainer plumbing). Isolated: a missing role column just means 'user'.
     try{ const pr=await sb.from('profiles').select('role').eq('id',userId).maybeSingle(); state.role=(pr.data&&pr.data.role)||'user'; }catch(e){ state.role='user'; }
     if(isTrainer()&&(state.logStep==='workout'||state.logStep==='type')&&!state._currentSession) state.logStep='trainer-home';
@@ -916,7 +920,7 @@ function screenKey(){
   switch(state.view){
     case 'log':        return `log:${state.logStep}:${state.selectedMuscle||''}:${state.selectedExercise||''}`;
     case 'nutrition':  return `nutrition:${state.nutritionView}`;
-    case 'bodyweight': return `bodyweight:${state.weightView}`;
+    case 'bodyweight': return `bodyweight:${state.bodyView}:${state.weightView}`;
     case 'history':    return `history:${state.historyTab}`;
     case 'mealprep':   return `mealprep:${state.mpStep}`;
     default:           return state.view;
@@ -990,7 +994,7 @@ function renderNav(){
     {id:'log',       icon:iconPlate(),     label:'Workout'},
     {id:'history',   icon:iconHourglass(), label:'Plans'},
     {id:'nutrition', icon:iconNutrition(), label:'Nutrition'},
-    {id:'bodyweight',icon:iconScale(),     label:'Weight'},
+    {id:'bodyweight',icon:iconScale(),     label:'Body'},
     {id:'more',      icon:iconList(),      label:'More'},
   ];
   // Meal Prep is a Nutrition sub-screen, so its tab stays lit while you're there.
@@ -1649,14 +1653,133 @@ function sortedFavorites(){
 }
 
 // ── BODYWEIGHT ────────────────────────────────────────────────────────────────
+// ── BODY MEASUREMENTS ─────────────────────────────────────────────────────────
+// One row per check-in in body_measurements (body-measurements-setup.sql):
+// data = {site: inches}. Canonical storage is inches; cm is display-only.
+// Blank fields are simply absent, so a waist-only check-in is valid.
+const MEAS_SITES=[
+  {k:'shoulders',l:'Shoulders',g:'upper'},
+  {k:'chest',l:'Chest',g:'upper'},
+  {k:'waist',l:'Waist',g:'upper',hint:'at navel',tip:'Measure at the navel, tape level all the way around (check it isn\'t dipping at the back). Stand relaxed and measure at the end of a normal exhale; don\'t suck in or flex. Use the same spot every time.'},
+  {k:'upperWaist',l:'Upper waist',g:'upper',hint:'narrowest point',opt:true},
+  {k:'armL',l:'Arm (L)',g:'upper',hint:'flexed'},
+  {k:'armR',l:'Arm (R)',g:'upper',hint:'flexed'},
+  {k:'forearm',l:'Forearm',g:'upper',opt:true},
+  {k:'neck',l:'Neck',g:'upper'},
+  {k:'hips',l:'Hips',g:'lower'},
+  {k:'thigh',l:'Thigh',g:'lower'},
+  {k:'calf',l:'Calf',g:'lower'},
+];
+function measSitesOn(){ try{ const s=JSON.parse(localStorage.getItem('li_meas_sites')||'null'); if(Array.isArray(s)&&s.length) return s; }catch(e){} return MEAS_SITES.filter(x=>!x.opt).map(x=>x.k); }
+function measUnit(){ return state.measUnit==='cm'?'cm':'in'; }
+function inToDisp(v){ if(v==null||v==='') return ''; const n=measUnit()==='cm'?+v*2.54:+v; return +n.toFixed(measUnit()==='cm'?1:2); }
+function dispToIn(v){ const n=parseFloat(v); if(!(n>0)) return null; return measUnit()==='cm'?+(n/2.54).toFixed(3):n; }
+function measSorted(){ return [...state.measurements].sort((a,b)=>a.date-b.date); }
+// Latest value for a site, and the value before it (each site tracks independently).
+function measSiteHistory(k){ return measSorted().filter(m=>m.data&&m.data[k]!=null).map(m=>({date:m.date,v:+m.data[k]})); }
+function measRatioHistory(){ return measSorted().filter(m=>m.data&&m.data.shoulders&&m.data.waist).map(m=>({date:m.date,v:m.data.shoulders/m.data.waist})); }
+function measTipHtml(site){ return site.tip?`<button type="button" class="meas-tip-btn" data-meas-tip="${site.k}" aria-label="Where to measure ${esc(site.l)}" style="background:none;border:1px solid var(--border);border-radius:50%;width:20px;height:20px;padding:0;font-size:11px;font-weight:800;color:var(--accent);cursor:pointer;line-height:18px;vertical-align:1px;margin-left:4px">i</button>`:''; }
+function measTipBox(site){ return site.tip?`<div id="meas-tip-${site.k}" style="display:none;font-size:12px;color:var(--text-muted);line-height:1.5;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:8px 10px;margin-top:6px">${esc(site.tip)}</div>`:''; }
+function bindMeasTips(){ document.querySelectorAll('[data-meas-tip]').forEach(b=>b.addEventListener('click',e=>{ e.stopPropagation(); const box=document.getElementById('meas-tip-'+b.dataset.measTip); if(box) box.style.display=box.style.display==='none'?'block':'none'; })); }
+function measLineChart(pts,fmt){
+  if(pts.length<2) return `<div class="empty" style="padding:10px 0">Log at least two check-ins to see a trend.</div>`;
+  const W=330,H=140,L=38,R=12,T=12,B=24;
+  const vs=pts.map(p=>p.v), lo=Math.min(...vs), hi=Math.max(...vs), pad=(hi-lo)*0.15||0.5;
+  const y0=lo-pad, y1=hi+pad, t0=pts[0].date, t1=pts[pts.length-1].date||t0+1;
+  const X=d=>L+(t1===t0?0.5:(d-t0)/(t1-t0))*(W-L-R), Y=v=>T+(1-(v-y0)/(y1-y0))*(H-T-B);
+  const line=pts.map(p=>`${X(p.date).toFixed(1)},${Y(p.v).toFixed(1)}`).join(' ');
+  const ticks=[y0+pad,(y0+y1)/2,y1-pad];
+  return `<svg viewBox="0 0 ${W} ${H}" style="width:100%;display:block" role="img" aria-label="Trend chart">
+    ${ticks.map(v=>`<line x1="${L}" y1="${Y(v).toFixed(1)}" x2="${W-R}" y2="${Y(v).toFixed(1)}" stroke="var(--border)" stroke-width="1"/><text x="${L-5}" y="${(Y(v)+3).toFixed(1)}" text-anchor="end" font-size="9" fill="var(--text-muted)" font-family="system-ui">${fmt(v)}</text>`).join('')}
+    <polyline points="${line}" fill="none" stroke="var(--accent)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+    ${pts.map(p=>`<circle cx="${X(p.date).toFixed(1)}" cy="${Y(p.v).toFixed(1)}" r="3.2" fill="var(--accent)"/>`).join('')}
+    <text x="${L}" y="${H-6}" font-size="9" fill="var(--text-muted)" font-family="system-ui">${fmtDateShort(t0)}</text>
+    <text x="${W-R}" y="${H-6}" text-anchor="end" font-size="9" fill="var(--text-muted)" font-family="system-ui">${fmtDateShort(t1)}</text>
+  </svg>`;
+}
+function renderMeasurements(){
+  const u=measUnit(), on=measSitesOn();
+  const sites=MEAS_SITES.filter(s=>on.includes(s.k)||measSiteHistory(s.k).length);
+  const ms=measSorted(), last=ms[ms.length-1];
+  const rh=measRatioHistory(), rNow=rh[rh.length-1], rPrev=rh[rh.length-2];
+  const chartK=state.measChartSite||'waist', chartSite=MEAS_SITES.find(s=>s.k===chartK)||MEAS_SITES[2];
+  const rangeMs={'1M':30,'3M':91,'1Y':365}[state.measRange]; const cutoff=rangeMs?Date.now()-rangeMs*864e5:0;
+  const chartPts=measSiteHistory(chartSite.k).filter(p=>p.date>=cutoff).map(p=>({date:p.date,v:inToDisp(p.v)}));
+  const fmtD=x=>(x>0?'+':x<0?'−':'')+Math.abs(x).toFixed(u==='cm'?1:2).replace(/\.?0+$/,'');
+  return `
+    ${rNow?`<div class="card"><div class="card-title">V-Taper Ratio</div><div style="display:flex;align-items:center;gap:14px">
+      <div style="font-size:36px;font-weight:900">${rNow.v.toFixed(2)}</div>
+      <div style="flex:1;font-size:12px;color:var(--text-muted);line-height:1.5">${rPrev?`<b style="color:${rNow.v>=rPrev.v?'var(--green)':'var(--amber)'}">${rNow.v>=rPrev.v?'▲':'▼'} ${Math.abs(rNow.v-rPrev.v).toFixed(2)}</b> since ${fmtDateShort(rPrev.date)}<br>`:''}Shoulders ÷ waist, from your ${fmtDateShort(rNow.date)} check-in</div>
+    </div></div>`:''}
+    ${ms.length?`<div class="card"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px"><div class="card-title" style="margin:0">Latest — ${fmtDateShort(last.date)}</div><div style="font-size:11px;color:var(--text-muted)">${u} · change vs previous</div></div>
+      ${sites.map(s=>{ const h=measSiteHistory(s.k), c=h[h.length-1], p=h[h.length-2]; const d=c&&p?inToDisp(c.v)-inToDisp(p.v):null;
+        return `<div data-meas-site="${s.k}" style="display:flex;align-items:center;width:100%;box-sizing:border-box;background:${chartSite.k===s.k?'var(--accent-dim)':'none'};border-bottom:1px solid var(--surface2);border-radius:6px;padding:9px 6px;cursor:pointer;color:var(--text)">
+          <span style="flex:1;font-size:14px;font-weight:700">${esc(s.l)}${measTipHtml(s)}</span>
+          <span style="font-size:15px;font-weight:800;width:64px;text-align:right">${c?inToDisp(c.v):'—'}</span>
+          <span style="font-size:12px;font-weight:700;width:58px;text-align:right;color:${d>0?'var(--accent)':d<0?'var(--amber)':'var(--text-muted)'}">${d==null||Math.abs(d)<0.005?'—':fmtD(d)}</span>
+        </div>${measTipBox(s)}`; }).join('')}
+      <div style="font-size:10px;color:var(--text-muted);margin-top:8px">Tap a row to chart it · blue = up · amber = down</div></div>
+    <div class="card"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px"><div class="card-title" style="margin:0">${esc(chartSite.l)} — trend (${u})</div>
+      <div style="display:flex;gap:4px">${['1M','3M','1Y','All'].map(r=>`<button class="period-btn ${state.measRange===r?'active':''}" data-meas-range="${r}" style="padding:4px 9px;font-size:11px">${r}</button>`).join('')}</div></div>
+      ${measLineChart(chartPts,v=>v.toFixed(u==='cm'?0:1))}
+    </div>`:`<div class="empty" style="line-height:1.6">No measurements yet. Log a check-in every 2–4 weeks; same time of day, same conditions.</div>`}
+    <button class="btn btn-primary btn-full" id="meas-new">+ New Check-in</button>
+    ${ms.length?`<div style="font-size:11px;color:var(--text-muted);text-align:center">Next suggested check-in: ${fmtDateShort(last.date+14*864e5)}</div>
+    <div class="card"><div class="card-title">Check-ins</div><div class="wt-list">${[...ms].reverse().slice(0,24).map(m=>`<div class="wt-row"><div class="wt-date">${fmtDate(m.date)}</div><div style="display:flex;align-items:center;gap:10px"><div style="font-size:12px;color:var(--text-muted)">${Object.keys(m.data||{}).length} sites</div><button class="wt-del" data-del-meas="${m.id}" aria-label="Delete check-in">✕</button></div></div>`).join('')}</div></div>`:''}`;
+}
+function showMeasCheckInModal(){
+  const draft={}; let on=measSitesOn();
+  const sync=()=>{ document.querySelectorAll('[data-meas-in]').forEach(i=>{ draft[i.dataset.measIn]=i.value; }); };
+  const rerender=()=>{
+    const u=measUnit();
+    const row=s=>{ const h=measSiteHistory(s.k), c=h[h.length-1];
+      return `<div><div style="display:flex;align-items:center;gap:10px"><label for="mi-${s.k}" style="flex:1;font-size:14px;font-weight:700;margin:0;color:var(--text)">${esc(s.l)}${s.hint?` <span style="font-size:11px;color:var(--text-muted);font-weight:600">${esc(s.hint)}</span>`:''}${measTipHtml(s)}</label>
+        <input type="number" inputmode="decimal" step="0.25" id="mi-${s.k}" data-meas-in="${s.k}" value="${esc(draft[s.k]||'')}" placeholder="${c?'last '+inToDisp(c.v):u}" style="width:100px;text-align:center;padding:10px 6px;font-size:16px"></div>${measTipBox(s)}</div>`; };
+    const group=(g,title)=>{ const ss=MEAS_SITES.filter(s=>s.g===g&&on.includes(s.k)); return ss.length?`<div class="card-title" style="margin:12px 0 8px">${title}</div><div class="section-gap">${ss.map(row).join('')}</div>`:''; };
+    document.getElementById('modal-root').innerHTML=`<div class="modal-overlay" id="modal-overlay"><div class="modal" style="max-height:88vh;overflow-y:auto">
+      <div class="modal-title">New Check-in · ${u}</div>
+      <div style="font-size:12px;color:var(--text-muted);line-height:1.5">Measure relaxed, same time of day, tape snug but not compressing. Leave a field blank to skip it; grey hints are your last values.</div>
+      ${group('upper','Upper body')}${group('lower','Lower body')}
+      <div id="mi-ratio" style="margin-top:12px"></div>
+      <div class="card-title" style="margin:14px 0 8px">Sites shown</div>
+      <div style="display:flex;flex-wrap:wrap;gap:6px">${MEAS_SITES.map(s=>`<button class="period-btn ${on.includes(s.k)?'active':''}" data-meas-toggle="${s.k}">${esc(s.l)}</button>`).join('')}</div>
+      <div class="btn-grid" style="margin-top:14px"><button class="btn btn-outline" id="modal-cancel">Cancel</button><button class="btn btn-primary" id="mi-save">Save Check-in</button></div>
+    </div></div>`;
+    const ratio=()=>{ const sh=dispToIn(document.getElementById('mi-shoulders')?.value), wa=dispToIn(document.getElementById('mi-waist')?.value); const el=document.getElementById('mi-ratio'); if(el) el.innerHTML=sh&&wa?`<div style="background:var(--green-dim);border:1px solid var(--green);border-radius:var(--radius-sm);padding:9px 12px;display:flex;justify-content:space-between;font-weight:800;color:var(--green)"><span style="font-size:13px">V-taper ratio this check-in</span><span>${(sh/wa).toFixed(2)}</span></div>`:''; };
+    document.querySelectorAll('[data-meas-in]').forEach(i=>i.addEventListener('input',ratio)); ratio();
+    bindMeasTips();
+    document.getElementById('modal-cancel').addEventListener('click',closeModal);
+    document.getElementById('modal-overlay').addEventListener('click',e=>{ if(e.target===e.currentTarget) closeModal(); });
+    document.querySelectorAll('[data-meas-toggle]').forEach(b=>b.addEventListener('click',()=>{ sync(); const k=b.dataset.measToggle; on=on.includes(k)?on.filter(x=>x!==k):[...on,k]; if(!on.length) on=[k]; try{ localStorage.setItem('li_meas_sites',JSON.stringify(on)); }catch(e){} rerender(); }));
+    document.getElementById('mi-save').addEventListener('click',async()=>{
+      sync(); const data={};
+      Object.entries(draft).forEach(([k,v])=>{ const n=dispToIn(v); if(n) data[k]=n; });
+      if(!Object.keys(data).length){ toast('Enter at least one measurement','var(--red)'); return; }
+      const m={id:uid(),date:Date.now(),data};
+      const {error}=await sb.from('body_measurements').insert({id:m.id,user_id:currentUser.id,date:m.date,data});
+      if(error){ toast('Save failed — run body-measurements-setup.sql','var(--red)'); return; }
+      state.measurements.push(m); closeModal(); render(); toast(`Check-in saved · ${Object.keys(data).length} site${Object.keys(data).length!==1?'s':''}`);
+    });
+  };
+  rerender();
+}
+
 function renderBodyweight(){
+  const bv=state.bodyView==='meas'?'meas':'weight';
+  const viewToggle=`<div class="toggle-group"><div class="toggle-opt ${bv==='weight'?'active':''}" data-bodyview="weight">Weight</div><div class="toggle-opt ${bv==='meas'?'active':''}" data-bodyview="meas">Measurements</div></div>`;
+  if(bv==='meas'){
+    const mu=measUnit();
+    return `<div class="page-header"><div class="page-title">Body</div><div style="display:flex;align-items:center;gap:8px">${versionStamp()}<div class="toggle-group" style="width:auto"><div class="toggle-opt ${mu==='in'?'active':''}" data-measunit="in" style="padding:7px 14px;font-size:13px">in</div><div class="toggle-opt ${mu==='cm'?'active':''}" data-measunit="cm" style="padding:7px 14px;font-size:13px">cm</div></div></div></div>
+      ${viewToggle}${renderMeasurements()}`;
+  }
   const log=[...state.weightLog].reverse();
   const latest=log[0];
   const unit=state.weightUnit;
   const view=state.weightView;
   const period=state.weightPeriod;
   return `
-    <div class="page-header"><div class="page-title">Body Weight</div><div style="display:flex;align-items:center;gap:8px">${versionStamp()}<div class="toggle-group" style="width:auto"><div class="toggle-opt ${unit==='lbs'?'active':''}" data-wunit="lbs" style="padding:7px 14px;font-size:13px">lbs</div><div class="toggle-opt ${unit==='kg'?'active':''}" data-wunit="kg" style="padding:7px 14px;font-size:13px">kg</div></div></div></div>
+    <div class="page-header"><div class="page-title">Body</div><div style="display:flex;align-items:center;gap:8px">${versionStamp()}<div class="toggle-group" style="width:auto"><div class="toggle-opt ${unit==='lbs'?'active':''}" data-wunit="lbs" style="padding:7px 14px;font-size:13px">lbs</div><div class="toggle-opt ${unit==='kg'?'active':''}" data-wunit="kg" style="padding:7px 14px;font-size:13px">kg</div></div></div></div>
+    ${viewToggle}
     ${latest?`<div class="stat-grid"><div class="stat-card"><div class="stat-val">${displayWeight(latest)}</div><div class="stat-label">Latest</div></div><div class="stat-card"><div class="stat-val">${state.weightLog.length}</div><div class="stat-label">Entries</div></div></div>`:''}
     <div class="card"><div class="card-title">Log Today's Weight</div><div class="field"><label>Weight (${unit})</label><input type="number" id="wt-input" placeholder="e.g. 185" step="0.1" style="font-size:22px;text-align:center;font-weight:800"></div><button class="btn btn-primary" id="log-weight-btn" style="margin-top:10px">Log Weight</button></div>
     ${log.length?`
@@ -2466,6 +2589,15 @@ function attachEvents(){
     dbSaveMealPrep(); state.mpStep='week'; state.mpDraft=null; render(); toast('Meal saved ✓');
   });
 
+  // Body tab: Weight | Measurements
+  document.querySelectorAll('[data-bodyview]').forEach(b=>b.addEventListener('click',()=>{ state.bodyView=b.dataset.bodyview; render(); }));
+  document.querySelectorAll('[data-measunit]').forEach(b=>b.addEventListener('click',()=>{ state.measUnit=b.dataset.measunit; try{ localStorage.setItem('li_meas_unit',state.measUnit); }catch(e){} render(); }));
+  document.querySelectorAll('[data-meas-site]').forEach(b=>b.addEventListener('click',()=>{ state.measChartSite=b.dataset.measSite; render(); }));
+  document.querySelectorAll('[data-meas-range]').forEach(b=>b.addEventListener('click',()=>{ state.measRange=b.dataset.measRange; render(); }));
+  el('meas-new',showMeasCheckInModal);
+  document.querySelectorAll('[data-del-meas]').forEach(b=>b.addEventListener('click',()=>{ if(!confirm('Delete this check-in?')) return; const id=b.dataset.delMeas; state.measurements=state.measurements.filter(m=>m.id!==id); render(); sb.from('body_measurements').delete().eq('id',id).eq('user_id',currentUser.id).then(null,()=>{}); toast('Check-in deleted'); }));
+  if(state.view==='bodyweight'&&state.bodyView==='meas') bindMeasTips();
+
   el('log-weight-btn',()=>{
     const input=document.getElementById('wt-input'); const val=parseFloat(input.value);
     if(!val||val<=0){ toast('Enter a valid weight','var(--red)'); return; }
@@ -2664,6 +2796,12 @@ function exportAllCSV(){ try{
   rows.push(['Exercise','Weight (lbs)','Reps','Date','','','']);
   Object.entries(state.prs).sort((a,b)=>a[0].localeCompare(b[0])).forEach(([ex,pr])=>rows.push([ex,pr.weight,pr.reps,fmtDate(pr.date),'','','']));
   rows.push(blank);
+  if(state.measurements&&state.measurements.length){
+    rows.push(['BODY MEASUREMENTS (inches)','','','','','','']);
+    rows.push(['Date',...MEAS_SITES.map(x=>x.l),'V-Taper Ratio']);
+    measSorted().forEach(m=>{ const d=m.data||{}; rows.push([fmtDate(m.date),...MEAS_SITES.map(x=>d[x.k]!=null?d[x.k]:''),d.shoulders&&d.waist?(d.shoulders/d.waist).toFixed(3):'']); });
+    rows.push(blank);
+  }
   rows.push(['BODY WEIGHT','','','','','','']);
   rows.push(['Date','Weight (lbs)','Weight (kg)','','','','']);
   [...state.weightLog].sort((a,b)=>a.date-b.date).forEach(e=>{ const lbs=e.unit==='lbs'?e.value:kgToLbs(e.value); const kg=e.unit==='kg'?e.value:lbsToKg(e.value); rows.push([fmtDate(e.date),lbs,kg,'','','','']); });
@@ -3366,7 +3504,8 @@ function chime(){ try{ const ctx=new(window.AudioContext||window.webkitAudioCont
 function iconPlate(){ return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/><line x1="13.4" y1="10.6" x2="16.2" y2="7.8"/><line x1="10.6" y1="10.6" x2="7.8" y2="7.8"/><line x1="13.4" y1="13.4" x2="16.2" y2="16.2"/><line x1="10.6" y1="13.4" x2="7.8" y2="16.2"/></svg>`; }
 function iconCardio(){ return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>`; }
 function iconNutrition(){ return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15.45 15.4c-2.13.65-4.3.32-5.7-1.1-2.29-2.27-1.76-6.5 1.17-9.42 2.93-2.93 7.15-3.46 9.42-1.17 1.41 1.41 1.74 3.57 1.1 5.71-1.4-.51-3.26-.02-4.64 1.36-1.38 1.38-1.87 3.23-1.35 4.62z"/><path d="m11.25 15.6-2.16 2.16a2.5 2.5 0 1 1-4.56 1.73 2.49 2.49 0 0 1-1.41-4.24 2.5 2.5 0 0 1 3.14-.32l2.16-2.16"/></svg>`; }
-function iconScale(){ return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="3"/><path d="M7 13a5 5 0 0 1 10 0"/><path d="M12 13l-2.2-3"/><circle cx="12" cy="13" r=".6" fill="currentColor" stroke="none"/></svg>`; }
+// Balance scales (Body tab).
+function iconScale(){ return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v18"/><path d="M8 21h8"/><path d="M5 7h14"/><circle cx="12" cy="4" r="1" fill="currentColor" stroke="none"/><path d="M5 7l-3 7a3 3 0 0 0 6 0z"/><path d="M19 7l-3 7a3 3 0 0 0 6 0z"/></svg>`; }
 function iconHourglass(){ return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 22h14M5 2h14M17 22v-4.172a2 2 0 0 0-.586-1.414L12 12l-4.414 4.414A2 2 0 0 0 7 17.828V22M17 2v4.172a2 2 0 0 1-.586 1.414L12 12 7.586 7.586A2 2 0 0 1 7 6.172V2"/></svg>`; }
 function iconList(){ return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>`; }
 function iconTrophy(){ return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="8 20 12 20 16 20"/><line x1="12" y1="16" x2="12" y2="20"/><path d="M5 4H3a1 1 0 0 0-1 1v3a4 4 0 0 0 4 4"/><path d="M19 4h2a1 1 0 0 1 1 1v3a4 4 0 0 1-4 4"/><path d="M6 4h12v8a6 6 0 0 1-12 0V4z"/></svg>`; }
