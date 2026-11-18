@@ -406,7 +406,7 @@ async function deleteTicket(id){
   await loadSupportTickets(true); toast('Ticket deleted'); render();
 }
 
-const APP_VERSION = '2.42.2';
+const APP_VERSION = '2.42.3';
 const OWNER_UID     = '031a65ed-f52d-4a67-b271-47778e920c22';
 // Invite code from the URL (?invite=CODE) — drives the invite-only signup flow.
 let pendingInvite = new URLSearchParams(location.search).get('invite');
@@ -1262,6 +1262,13 @@ function renderCardioLog(){
         <button class="btn ${c.stopwatch.running?'btn-danger':'btn-green'}" id="sw-toggle">${c.stopwatch.running?'⏸ Pause':'▶ Start'}</button>
         <button class="btn btn-outline" id="sw-reset">↺ Reset</button>
       </div>
+      <div style="display:flex;align-items:center;justify-content:center;gap:6px;margin-top:12px;flex-wrap:wrap">
+        <span style="font-size:12px;font-weight:700;color:var(--text-muted)">Or enter it:</span>
+        <input type="number" id="sw-min" inputmode="numeric" min="0" value="${mins||''}" placeholder="0" aria-label="Minutes" style="width:72px;text-align:center;padding:8px 4px;font-size:16px;font-weight:700">
+        <span style="font-size:12px;color:var(--text-muted)">min</span>
+        <input type="number" id="sw-sec" inputmode="numeric" min="0" max="59" value="${secs||''}" placeholder="0" aria-label="Seconds" style="width:64px;text-align:center;padding:8px 4px;font-size:16px;font-weight:700">
+        <span style="font-size:12px;color:var(--text-muted)">sec</span>
+      </div>
     </div>
     <div class="card">
       <div class="card-title">Distance (optional)</div>
@@ -1342,6 +1349,17 @@ function updateSwDOM(){
   disp.style.color=state.cardio.stopwatch.running?'var(--accent)':'var(--text)';
   const btn=document.getElementById('sw-toggle');
   if(btn){ btn.textContent=state.cardio.stopwatch.running?'⏸ Pause':'▶ Start'; btn.className=`btn ${state.cardio.stopwatch.running?'btn-danger':'btn-green'}`; }
+  // Keep the manual min/sec boxes in step with the stopwatch, except the one being typed in.
+  const mi=document.getElementById('sw-min'), se=document.getElementById('sw-sec');
+  if(mi&&document.activeElement!==mi) mi.value=m||''; if(se&&document.activeElement!==se) se.value=s||'';
+}
+// Typing a duration pauses the stopwatch and sets elapsed directly (no
+// re-render, so focus and the keyboard stay put).
+function swManualInput(){
+  const mi=document.getElementById('sw-min'), se=document.getElementById('sw-sec');
+  const m=Math.max(0,parseInt(mi&&mi.value)||0), sec=Math.max(0,parseInt(se&&se.value)||0);
+  if(state.cardio.stopwatch.running) swStop();
+  state.cardio.stopwatch.elapsed=m*60+sec; state.cardio.manual=true; updateSwDOM();
 }
 
 // ── HR GUIDED TEST ────────────────────────────────────────────────────────────
@@ -1367,6 +1385,8 @@ function logCardioActivity(){
   const dist=distInput?parseFloat(distInput.value)||null:null;
   // t = when the cardio entry was saved (≈ its end); its start is t − duration.
   const entry={type:'cardio',name:state.cardio.activity,duration:state.cardio.stopwatch.elapsed,distance:dist,distUnit:state.cardio.distUnit,heartRate:state.cardio.heartRate,t:Date.now()};
+  // A typed-in duration may describe cardio done earlier, so its start time is unknown.
+  if(state.cardio.manual) entry.manual=true;
   if(!state._currentSession) state._currentSession={id:uid(),date:Date.now(),exercises:[]};
   state._currentSession.exercises.push(entry);
   swStop();
@@ -1678,9 +1698,13 @@ function measSorted(){ return [...state.measurements].sort((a,b)=>a.date-b.date)
 // Latest value for a site, and the value before it (each site tracks independently).
 function measSiteHistory(k){ return measSorted().filter(m=>m.data&&m.data[k]!=null).map(m=>({date:m.date,v:+m.data[k]})); }
 function measRatioHistory(){ return measSorted().filter(m=>m.data&&m.data.shoulders&&m.data.waist).map(m=>({date:m.date,v:m.data.shoulders/m.data.waist})); }
-function measTipHtml(site){ return site.tip?`<button type="button" class="meas-tip-btn" data-meas-tip="${site.k}" aria-label="Where to measure ${esc(site.l)}" style="background:none;border:1px solid var(--border);border-radius:50%;width:20px;height:20px;padding:0;font-size:11px;font-weight:800;color:var(--accent);cursor:pointer;line-height:18px;vertical-align:1px;margin-left:4px">i</button>`:''; }
-function measTipBox(site){ return site.tip?`<div id="meas-tip-${site.k}" style="display:none;font-size:12px;color:var(--text-muted);line-height:1.5;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:8px 10px;margin-top:6px">${esc(site.tip)}</div>`:''; }
-function bindMeasTips(){ document.querySelectorAll('[data-meas-tip]').forEach(b=>b.addEventListener('click',e=>{ e.stopPropagation(); const box=document.getElementById('meas-tip-'+b.dataset.measTip); if(box) box.style.display=box.style.display==='none'?'block':'none'; })); }
+function measTipHtml(site,scope='pg'){ return site.tip?`<button type="button" class="meas-tip-btn" data-meas-tip="${scope}-${site.k}" aria-label="Where to measure ${esc(site.l)}" style="background:none;border:1px solid var(--border);border-radius:50%;width:20px;height:20px;padding:0;font-size:11px;font-weight:800;color:var(--accent);cursor:pointer;line-height:18px;vertical-align:1px;margin-left:4px">i</button>`:''; }
+function measTipBox(site,scope='pg'){ return site.tip?`<div id="meas-tip-${scope}-${site.k}" style="display:none;font-size:12px;color:var(--text-muted);line-height:1.5;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:8px 10px;margin-top:6px">${esc(site.tip)}</div>`:''; }
+// Tooltip boxes are scoped per surface ('pg' = Measurements page, 'mo' = check-in
+// modal): the page stays rendered behind the modal, so unscoped ids collided and
+// the modal's (i) toggled the hidden page copy. preventDefault stops the
+// enclosing <label> from focusing its input (and popping the keyboard).
+function bindMeasTips(root){ (root||document).querySelectorAll('[data-meas-tip]').forEach(b=>b.addEventListener('click',e=>{ e.preventDefault(); e.stopPropagation(); const box=document.getElementById('meas-tip-'+b.dataset.measTip); if(box) box.style.display=box.style.display==='none'?'block':'none'; })); }
 function measLineChart(pts,fmt){
   if(pts.length<2) return `<div class="empty" style="padding:10px 0">Log at least two check-ins to see a trend.</div>`;
   const W=330,H=140,L=38,R=12,T=12,B=24;
@@ -1811,8 +1835,8 @@ function showMeasCheckInModal(){
   const rerender=()=>{
     const u=measUnit();
     const row=s=>{ const h=measSiteHistory(s.k), c=h[h.length-1];
-      return `<div><div style="display:flex;align-items:center;gap:10px"><label for="mi-${s.k}" style="flex:1;font-size:14px;font-weight:700;margin:0;color:var(--text)">${esc(s.l)}${s.hint?` <span style="font-size:11px;color:var(--text-muted);font-weight:600">${esc(s.hint)}</span>`:''}${measTipHtml(s)}</label>
-        <input type="number" inputmode="decimal" step="0.25" id="mi-${s.k}" data-meas-in="${s.k}" value="${esc(draft[s.k]||'')}" placeholder="${c?'last '+inToDisp(c.v):u}" style="width:100px;text-align:center;padding:10px 6px;font-size:16px"></div>${measTipBox(s)}</div>`; };
+      return `<div><div style="display:flex;align-items:center;gap:10px"><label for="mi-${s.k}" style="flex:1;font-size:14px;font-weight:700;margin:0;color:var(--text)">${esc(s.l)}${s.hint?` <span style="font-size:11px;color:var(--text-muted);font-weight:600">${esc(s.hint)}</span>`:''}${measTipHtml(s,'mo')}</label>
+        <input type="number" inputmode="decimal" step="0.25" id="mi-${s.k}" data-meas-in="${s.k}" value="${esc(draft[s.k]||'')}" placeholder="${c?'last '+inToDisp(c.v):u}" style="width:100px;text-align:center;padding:10px 6px;font-size:16px"></div>${measTipBox(s,'mo')}</div>`; };
     const group=(g,title)=>{ const ss=MEAS_SITES.filter(s=>s.g===g&&on.includes(s.k)); return ss.length?`<div class="card-title" style="margin:12px 0 8px">${title}</div><div class="section-gap">${ss.map(row).join('')}</div>`:''; };
     document.getElementById('modal-root').innerHTML=`<div class="modal-overlay" id="modal-overlay"><div class="modal" style="max-height:88vh;overflow-y:auto">
       <div class="modal-title">New Check-in · ${u}</div>
@@ -1825,7 +1849,7 @@ function showMeasCheckInModal(){
     </div></div>`;
     const ratio=()=>{ const sh=dispToIn(document.getElementById('mi-shoulders')?.value), wa=dispToIn(document.getElementById('mi-waist')?.value); const el=document.getElementById('mi-ratio'); if(el) el.innerHTML=sh&&wa?`<div style="background:var(--green-dim);border:1px solid var(--green);border-radius:var(--radius-sm);padding:9px 12px;display:flex;justify-content:space-between;font-weight:800;color:var(--green)"><span style="font-size:13px">V-taper ratio this check-in</span><span>${(sh/wa).toFixed(2)}</span></div>`:''; };
     document.querySelectorAll('[data-meas-in]').forEach(i=>i.addEventListener('input',ratio)); ratio();
-    bindMeasTips();
+    bindMeasTips(document.getElementById('modal-root'));
     document.getElementById('modal-cancel').addEventListener('click',closeModal);
     document.getElementById('modal-overlay').addEventListener('click',e=>{ if(e.target===e.currentTarget) closeModal(); });
     document.querySelectorAll('[data-meas-toggle]').forEach(b=>b.addEventListener('click',()=>{ sync(); const k=b.dataset.measToggle; on=on.includes(k)?on.filter(x=>x!==k):[...on,k]; if(!on.length) on=[k]; try{ localStorage.setItem('li_meas_sites',JSON.stringify(on)); }catch(e){} rerender(); }));
@@ -2536,7 +2560,8 @@ function attachEvents(){
 
   // Stopwatch
   el('sw-toggle',()=>{ state.cardio.stopwatch.running?swStop():swStart(); });
-  el('sw-reset',()=>{ swReset(); render(); });
+  el('sw-reset',()=>{ swReset(); state.cardio.manual=false; render(); });
+  ['sw-min','sw-sec'].forEach(id=>{ const i=document.getElementById(id); if(i) i.addEventListener('input',swManualInput); });
 
   // Distance unit
   document.querySelectorAll('[data-distunit]').forEach(b=>b.addEventListener('click',()=>{ state.cardio.distUnit=b.dataset.distunit; render(); }));
@@ -2676,7 +2701,7 @@ function attachEvents(){
   el('bf-profile',showBodyProfileModal);
   document.querySelectorAll('[data-bfmethod]').forEach(b=>b.addEventListener('click',()=>{ state.bodyProfile={...state.bodyProfile,bfMethod:b.dataset.bfmethod}; schedulePlanSave(); render(); }));
   document.querySelectorAll('[data-del-meas]').forEach(b=>b.addEventListener('click',()=>{ if(!confirm('Delete this check-in?')) return; const id=b.dataset.delMeas; state.measurements=state.measurements.filter(m=>m.id!==id); render(); sb.from('body_measurements').delete().eq('id',id).eq('user_id',currentUser.id).then(null,()=>{}); toast('Check-in deleted'); }));
-  if(state.view==='bodyweight'&&state.bodyView==='meas') bindMeasTips();
+  if(state.view==='bodyweight'&&state.bodyView==='meas') bindMeasTips(document.getElementById('views-wrap'));
 
   el('log-weight-btn',()=>{
     const input=document.getElementById('wt-input'); const val=parseFloat(input.value);
@@ -2835,7 +2860,7 @@ function fmtLocalTs(ms){ if(!ms) return ''; const d=new Date(ms), p=n=>String(n)
 function sessionTiming(s){
   const ts=[];
   (s.exercises||[]).forEach(ex=>{
-    if(ex.type==='cardio'){ if(ex.t){ ts.push(ex.t); ts.push(ex.t-(ex.duration||0)*1000); } return; }
+    if(ex.type==='cardio'){ if(ex.t){ ts.push(ex.t); if(!ex.manual) ts.push(ex.t-(ex.duration||0)*1000); } return; }
     (ex.sets||[]).forEach(x=>{ if(x.t) ts.push(x.t); });
   });
   if(!ts.length) return null;
@@ -2851,7 +2876,7 @@ function exportAllCSV(){ try{
   state.sessions.forEach(s=>{ const d=new Date(s.date).toLocaleDateString('en-US'); let working=0;
     s.exercises.forEach(ex=>{
     // Cardio entries have no sets array — collect for their own section below.
-    if(ex.type==='cardio'){ cardio.push([d,ex.name,ex.duration?fmtDuration(ex.duration):'',ex.distance||'',ex.distance?ex.distUnit:'',ex.heartRate||'',ex.t?fmtLocalTs(ex.t-(ex.duration||0)*1000):'',fmtLocalTs(ex.t),s.id]); return; }
+    if(ex.type==='cardio'){ cardio.push([d,ex.name,ex.duration?fmtDuration(ex.duration):'',ex.distance||'',ex.distance?ex.distUnit:'',ex.heartRate||'',ex.t&&!ex.manual?fmtLocalTs(ex.t-(ex.duration||0)*1000):'',fmtLocalTs(ex.t),s.id]); return; }
     if(!Array.isArray(ex.sets)) return;
     let wu=0,wk=0; ex.sets.forEach(set=>{ if(set.type==='warmup') wu++; else { wk++; working++; } rows.push([d,ex.muscle,ex.name,set.type,set.type==='warmup'?wu:wk,set.weight,set.reps,set.effort==='f'?'Failure':set.effort==='nf'?'Near Failure':'',set.uni?'Unilateral':'',(ex.machine||1)>1?'M'+ex.machine:'',fmtLocalTs(set.t),s.id]); });
     });
