@@ -406,7 +406,7 @@ async function deleteTicket(id){
   await loadSupportTickets(true); toast('Ticket deleted'); render();
 }
 
-const APP_VERSION = '2.42.3';
+const APP_VERSION = '2.43.0';
 const OWNER_UID     = '031a65ed-f52d-4a67-b271-47778e920c22';
 // Invite code from the URL (?invite=CODE) — drives the invite-only signup flow.
 let pendingInvite = new URLSearchParams(location.search).get('invite');
@@ -1699,7 +1699,51 @@ function measSorted(){ return [...state.measurements].sort((a,b)=>a.date-b.date)
 function measSiteHistory(k){ return measSorted().filter(m=>m.data&&m.data[k]!=null).map(m=>({date:m.date,v:+m.data[k]})); }
 function measRatioHistory(){ return measSorted().filter(m=>m.data&&m.data.shoulders&&m.data.waist).map(m=>({date:m.date,v:m.data.shoulders/m.data.waist})); }
 function measTipHtml(site,scope='pg'){ return site.tip?`<button type="button" class="meas-tip-btn" data-meas-tip="${scope}-${site.k}" aria-label="Where to measure ${esc(site.l)}" style="background:none;border:1px solid var(--border);border-radius:50%;width:20px;height:20px;padding:0;font-size:11px;font-weight:800;color:var(--accent);cursor:pointer;line-height:18px;vertical-align:1px;margin-left:4px">i</button>`:''; }
-function measTipBox(site,scope='pg'){ return site.tip?`<div id="meas-tip-${scope}-${site.k}" style="display:none;font-size:12px;color:var(--text-muted);line-height:1.5;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:8px 10px;margin-top:6px">${esc(site.tip)}</div>`:''; }
+// ── Measuring illustrations ──────────────────────────────────────────────────
+// A simple front-view figure drawn as two layers (outline strokes first, then
+// fills) so limbs and torso merge into one silhouette. The tape is an ellipse
+// at the site: front arc solid, back arc dashed. Arm sites use a flexed pose
+// with that arm raised; the figure faces you, so the person's LEFT arm is on
+// the viewer's right (the Arm (R) figure is mirrored).
+function measFigure(k){
+  const flex=k==='armL'||k==='armR';
+  const O='var(--text-muted)', F='var(--surface)', T='var(--accent)';
+  const limbs=[];  // [x1,y1,x2,y2,width]
+  const arm=(sx,dir)=>{ limbs.push([60+dir*30,52,60+dir*35,90,10],[60+dir*35,90,60+dir*38,124,8]); };
+  arm(-1,-1);
+  if(flex){ limbs.push([90,52,116,50,10],[116,50,114,24,8]); } else arm(1,1);
+  limbs.push([49,116,47,166,16],[47,166,47,210,11],[71,116,73,166,16],[73,166,73,210,11],[60,28,60,42,12]);
+  const hands=flex?[[22,129,5],[114,18,5.5]]:[[22,129,5],[98,129,5]];
+  const torso='M54 40 C44 41 36 42 33 47 L33 60 C34 72 40 82 42 92 C41 100 38 108 37 118 L83 118 C82 108 79 100 78 92 C80 82 86 72 87 60 L87 47 C84 42 76 41 66 40 Z';
+  const ln=(l,c,extra)=>`<line x1="${l[0]}" y1="${l[1]}" x2="${l[2]}" y2="${l[3]}" stroke="${c}" stroke-width="${l[4]+extra}" stroke-linecap="round"/>`;
+  const body=`<g>${limbs.map(l=>ln(l,O,2.4)).join('')}<path d="${torso}" fill="${O}" stroke="${O}" stroke-width="2.4" stroke-linejoin="round"/><circle cx="31" cy="50" r="9.2" fill="${O}"/><circle cx="${flex?90:89}" cy="50" r="9.2" fill="${O}"/>${hands.map(h=>`<circle cx="${h[0]}" cy="${h[1]}" r="${h[2]+1.2}" fill="${O}"/>`).join('')}<circle cx="60" cy="18" r="13.2" fill="${O}"/>
+    ${limbs.map(l=>ln(l,F,0)).join('')}<path d="${torso}" fill="${F}"/><circle cx="31" cy="50" r="8" fill="${F}"/><circle cx="${flex?90:89}" cy="50" r="8" fill="${F}"/>${hands.map(h=>`<circle cx="${h[0]}" cy="${h[1]}" r="${h[2]}" fill="${F}"/>`).join('')}<circle cx="60" cy="18" r="12" fill="${F}"/>
+    ${flex?`<circle cx="104" cy="45.5" r="6.5" fill="${F}" stroke="${O}" stroke-width="1.2"/><path d="M98 50 L110 50" stroke="${F}" stroke-width="4"/>`:''}</g>`;
+  // tape: [cx, cy, rx, ry]; horizontal loops show front (lower) arc solid, back arc dashed
+  const band=(cx,cy,rx,ry)=>`<path d="M${cx-rx} ${cy} A${rx} ${ry} 0 0 1 ${cx+rx} ${cy}" fill="none" stroke="${T}" stroke-width="2" stroke-dasharray="3 2.5" opacity=".55"/><path d="M${cx-rx} ${cy} A${rx} ${ry} 0 0 0 ${cx+rx} ${cy}" fill="none" stroke="${T}" stroke-width="3" stroke-linecap="round"/>`;
+  const vband=(cx,cy,rx,ry)=>`<path d="M${cx} ${cy-ry} A${rx} ${ry} 0 0 0 ${cx} ${cy+ry}" fill="none" stroke="${T}" stroke-width="2" stroke-dasharray="3 2.5" opacity=".55"/><path d="M${cx} ${cy-ry} A${rx} ${ry} 0 0 1 ${cx} ${cy+ry}" fill="none" stroke="${T}" stroke-width="3" stroke-linecap="round"/>`;
+  const tape={
+    neck:band(60,37,8,2.6), shoulders:band(60,52,37.5,4), chest:band(60,64,27.5,3.4),
+    upperWaist:band(60,84,19.5,3), waist:band(60,96,20.5,3)+`<circle cx="60" cy="96" r="1.6" fill="${O}"/>`,
+    hips:band(60,114,24,3.4), thigh:band(48.6,132,10.2,2.6), calf:band(47,182,7.2,2.2),
+    forearm:band(24.3,98,6.6,2.2), armL:vband(104,48,3,9), armR:vband(104,48,3,9),
+  }[k]||'';
+  const g=body+tape;
+  // Small loops (neck, arms, forearm) zoom in on that region; same aspect ratio as the full figure.
+  const vb={neck:'20 0 80 137',armL:'28 -4 100 171',armR:'-8 -4 100 171',forearm:'-6 30 80 137'}[k]||'-6 0 132 226';
+  return `<svg viewBox="${vb}" width="78" height="134" role="img" aria-label="Where the tape goes for ${k}" style="flex-shrink:0;display:block">${k==='armR'?`<g transform="translate(120,0) scale(-1,1)">${g}</g>`:g}</svg>`;
+}
+function measTipBox(site,scope='pg'){ return site.tip?`<div id="meas-tip-${scope}-${site.k}" style="display:none;font-size:12px;color:var(--text-muted);line-height:1.5;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:8px 10px;margin-top:6px"><div style="display:flex;gap:10px;align-items:center">${measFigure(site.k)}<div>${esc(site.tip)}</div></div></div>`:''; }
+function showMeasGuideModal(){
+  document.getElementById('modal-root').innerHTML=`<div class="modal-overlay" id="modal-overlay"><div class="modal" style="max-height:88vh;overflow-y:auto">
+    <div class="modal-title">How to Measure</div>
+    <div style="font-size:12px;color:var(--text-muted);line-height:1.5;margin-bottom:10px">Solid blue = the tape across the front; dashed = where it wraps around the back. Keep the tape level and snug, never compressing, and measure the same way every time.</div>
+    <div class="section-gap">${MEAS_SITES.map(s=>`<div style="display:flex;gap:12px;align-items:center;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:8px 10px">${measFigure(s.k)}<div><div style="font-size:14px;font-weight:800;color:var(--text);margin-bottom:3px">${esc(s.l)}${s.opt?' <span style="font-size:10px;color:var(--text-muted);font-weight:700">optional</span>':''}</div><div style="font-size:12px;color:var(--text-muted);line-height:1.5">${esc(s.tip||'')}</div></div></div>`).join('')}</div>
+    <button class="btn btn-outline btn-full" id="modal-cancel" style="margin-top:12px">Close</button>
+  </div></div>`;
+  document.getElementById('modal-cancel').addEventListener('click',closeModal);
+  document.getElementById('modal-overlay').addEventListener('click',e=>{ if(e.target===e.currentTarget) closeModal(); });
+}
 // Tooltip boxes are scoped per surface ('pg' = Measurements page, 'mo' = check-in
 // modal): the page stays rendered behind the modal, so unscoped ids collided and
 // the modal's (i) toggled the hidden page copy. preventDefault stops the
@@ -1826,6 +1870,7 @@ function renderMeasurements(){
       ${measLineChart(chartPts,v=>v.toFixed(u==='cm'?0:1))}
     </div>`:`<div class="empty" style="line-height:1.6">No measurements yet. Log a check-in every 2–4 weeks; same time of day, same conditions.</div>`}
     <button class="btn btn-primary btn-full" id="meas-new">+ New Check-in</button>
+    <button class="btn btn-outline btn-full" id="meas-guide">📏 How to measure</button>
     ${ms.length?`<div style="font-size:11px;color:var(--text-muted);text-align:center">Next suggested check-in: ${fmtDateShort(last.date+14*864e5)}</div>
     <div class="card"><div class="card-title">Check-ins</div><div class="wt-list">${[...ms].reverse().slice(0,24).map(m=>`<div class="wt-row"><div class="wt-date">${fmtDate(m.date)}</div><div style="display:flex;align-items:center;gap:10px"><div style="font-size:12px;color:var(--text-muted)">${Object.keys(m.data||{}).length} sites</div><button class="wt-del" data-del-meas="${m.id}" aria-label="Delete check-in">✕</button></div></div>`).join('')}</div></div>`:''}`;
 }
@@ -2698,6 +2743,7 @@ function attachEvents(){
   document.querySelectorAll('[data-meas-site]').forEach(b=>b.addEventListener('click',()=>{ state.measChartSite=b.dataset.measSite; render(); }));
   document.querySelectorAll('[data-meas-range]').forEach(b=>b.addEventListener('click',()=>{ state.measRange=b.dataset.measRange; render(); }));
   el('meas-new',showMeasCheckInModal);
+  el('meas-guide',showMeasGuideModal);
   el('bf-profile',showBodyProfileModal);
   document.querySelectorAll('[data-bfmethod]').forEach(b=>b.addEventListener('click',()=>{ state.bodyProfile={...state.bodyProfile,bfMethod:b.dataset.bfmethod}; schedulePlanSave(); render(); }));
   document.querySelectorAll('[data-del-meas]').forEach(b=>b.addEventListener('click',()=>{ if(!confirm('Delete this check-in?')) return; const id=b.dataset.delMeas; state.measurements=state.measurements.filter(m=>m.id!==id); render(); sb.from('body_measurements').delete().eq('id',id).eq('user_id',currentUser.id).then(null,()=>{}); toast('Check-in deleted'); }));
