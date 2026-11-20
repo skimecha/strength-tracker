@@ -406,7 +406,7 @@ async function deleteTicket(id){
   await loadSupportTickets(true); toast('Ticket deleted'); render();
 }
 
-const APP_VERSION = '2.43.1';
+const APP_VERSION = '2.43.2';
 const OWNER_UID     = '031a65ed-f52d-4a67-b271-47778e920c22';
 // Invite code from the URL (?invite=CODE) — drives the invite-only signup flow.
 let pendingInvite = new URLSearchParams(location.search).get('invite');
@@ -1678,7 +1678,7 @@ function sortedFavorites(){
 // data = {site: inches}. Canonical storage is inches; cm is display-only.
 // Blank fields are simply absent, so a waist-only check-in is valid.
 const MEAS_SITES=[
-  {k:'shoulders',l:'Shoulders',g:'upper',tip:'Around the widest point of your shoulders, over the outer delts, arms relaxed at your sides. Keep the tape level all the way around; a mirror or a helper makes this much easier. Measure at the end of a normal exhale.'},
+  {k:'shoulders',l:'Shoulders',g:'upper',hint:'all the way around',tip:'This is a circumference, not a width: the tape goes all the way around your body, not just across your back or chest. Stand with your arms hanging relaxed at your sides. Wrap the tape around the outside of both shoulders at their widest point, over the outer delts, so both upper arms are INSIDE the loop. Keep it level across your back (check in a mirror) and read it at the end of a normal exhale. The result should be larger than your chest measurement, typically by 3–8 inches.'},
   {k:'chest',l:'Chest',g:'upper',tip:'Around the fullest part of your chest, across the nipple line and under the armpits, arms relaxed at your sides. Tape level across the back. Measure at the end of a normal exhale; don\'t puff up or flex.'},
   {k:'waist',l:'Waist',g:'upper',hint:'at navel',tip:'Measure at the navel, tape level all the way around (check it isn\'t dipping at the back). Stand relaxed and measure at the end of a normal exhale; don\'t suck in or flex. Use the same spot every time.'},
   {k:'upperWaist',l:'Upper waist',g:'upper',hint:'narrowest point',opt:true,tip:'At the narrowest point of your torso, usually a few inches above the navel and below the ribs. Stand relaxed, tape level, measured at the end of a normal exhale; don\'t suck in.'},
@@ -1872,10 +1872,13 @@ function renderMeasurements(){
     <button class="btn btn-primary btn-full" id="meas-new">+ New Check-in</button>
     <button class="btn btn-outline btn-full" id="meas-guide">📏 How to measure</button>
     ${ms.length?`<div style="font-size:11px;color:var(--text-muted);text-align:center">Next suggested check-in: ${fmtDateShort(last.date+14*864e5)}</div>
-    <div class="card"><div class="card-title">Check-ins</div><div class="wt-list">${[...ms].reverse().slice(0,24).map(m=>`<div class="wt-row"><div class="wt-date">${fmtDate(m.date)}</div><div style="display:flex;align-items:center;gap:10px"><div style="font-size:12px;color:var(--text-muted)">${Object.keys(m.data||{}).length} sites</div><button class="wt-del" data-del-meas="${m.id}" aria-label="Delete check-in">✕</button></div></div>`).join('')}</div></div>`:''}`;
+    <div class="card"><div class="card-title">Check-ins</div><div class="wt-list">${[...ms].reverse().slice(0,24).map(m=>`<div class="wt-row"><div class="wt-date">${fmtDate(m.date)}</div><div style="display:flex;align-items:center;gap:10px"><div style="font-size:12px;color:var(--text-muted)">${Object.keys(m.data||{}).length} sites</div><button class="btn btn-outline btn-xs" data-edit-meas="${m.id}" aria-label="Edit check-in">✎</button><button class="wt-del" data-del-meas="${m.id}" aria-label="Delete check-in">✕</button></div></div>`).join('')}</div></div>`:''}`;
 }
-function showMeasCheckInModal(){
-  const draft={}; let on=measSitesOn();
+function showMeasCheckInModal(editId){
+  // editId set → edit that check-in in place (same date); otherwise a new one.
+  const editing=editId?state.measurements.find(m=>m.id===editId):null;
+  const draft={}, orig={}; let on=measSitesOn();
+  if(editing){ Object.entries(editing.data||{}).forEach(([k,v])=>{ draft[k]=orig[k]=String(inToDisp(v)); }); on=[...new Set([...on,...Object.keys(editing.data||{})])]; }
   const sync=()=>{ document.querySelectorAll('[data-meas-in]').forEach(i=>{ draft[i.dataset.measIn]=i.value; }); };
   const rerender=()=>{
     const u=measUnit();
@@ -1884,7 +1887,7 @@ function showMeasCheckInModal(){
         <input type="number" inputmode="decimal" step="0.25" id="mi-${s.k}" data-meas-in="${s.k}" value="${esc(draft[s.k]||'')}" placeholder="${c?'last '+inToDisp(c.v):u}" style="width:100px;text-align:center;padding:10px 6px;font-size:16px"></div>${measTipBox(s,'mo')}</div>`; };
     const group=(g,title)=>{ const ss=MEAS_SITES.filter(s=>s.g===g&&on.includes(s.k)); return ss.length?`<div class="card-title" style="margin:12px 0 8px">${title}</div><div class="section-gap">${ss.map(row).join('')}</div>`:''; };
     document.getElementById('modal-root').innerHTML=`<div class="modal-overlay" id="modal-overlay"><div class="modal" style="max-height:88vh;overflow-y:auto">
-      <div class="modal-title">New Check-in · ${u}</div>
+      <div class="modal-title">${editing?`Edit Check-in · ${fmtDateShort(editing.date)}`:'New Check-in'} · ${u}</div>
       <div style="font-size:12px;color:var(--text-muted);line-height:1.5">Measure relaxed, same time of day, tape snug but not compressing. Leave a field blank to skip it; grey hints are your last values.</div>
       ${group('upper','Upper body')}${group('lower','Lower body')}
       <div id="mi-ratio" style="margin-top:12px"></div>
@@ -1900,8 +1903,17 @@ function showMeasCheckInModal(){
     document.querySelectorAll('[data-meas-toggle]').forEach(b=>b.addEventListener('click',()=>{ sync(); const k=b.dataset.measToggle; on=on.includes(k)?on.filter(x=>x!==k):[...on,k]; if(!on.length) on=[k]; try{ localStorage.setItem('li_meas_sites',JSON.stringify(on)); }catch(e){} rerender(); }));
     document.getElementById('mi-save').addEventListener('click',async()=>{
       sync(); const data={};
-      Object.entries(draft).forEach(([k,v])=>{ const n=dispToIn(v); if(n) data[k]=n; });
+      // Unchanged prefilled values keep their exact stored inches (no cm round-trip drift).
+      Object.entries(draft).forEach(([k,v])=>{ if(editing&&orig[k]!==undefined&&v===orig[k]){ data[k]=editing.data[k]; return; } const n=dispToIn(v); if(n) data[k]=n; });
       if(!Object.keys(data).length){ toast('Enter at least one measurement','var(--red)'); return; }
+      // Sanity check: shoulder circumference encloses the chest plus both arms, so it should exceed chest.
+      const chestRef=data.chest||(measSiteHistory('chest').slice(-1)[0]||{}).v;
+      if(data.shoulders&&chestRef&&data.shoulders<chestRef&&!confirm(`Shoulders (${inToDisp(data.shoulders)} ${u}) is smaller than chest (${inToDisp(chestRef)} ${u}). Shoulders is a full circumference around both shoulders and upper arms, so it's normally larger than chest. Save anyway?`)) return;
+      if(editing){
+        const {error}=await sb.from('body_measurements').update({data}).eq('id',editing.id).eq('user_id',currentUser.id);
+        if(error){ toast('Save failed: '+(error.message||'try again'),'var(--red)'); return; }
+        editing.data=data; closeModal(); render(); toast('Check-in updated'); return;
+      }
       const m={id:uid(),date:Date.now(),data};
       const {error}=await sb.from('body_measurements').insert({id:m.id,user_id:currentUser.id,date:m.date,data});
       if(error){ toast('Save failed — run body-measurements-setup.sql','var(--red)'); return; }
@@ -2742,7 +2754,8 @@ function attachEvents(){
   document.querySelectorAll('[data-measunit]').forEach(b=>b.addEventListener('click',()=>{ state.measUnit=b.dataset.measunit; try{ localStorage.setItem('li_meas_unit',state.measUnit); }catch(e){} render(); }));
   document.querySelectorAll('[data-meas-site]').forEach(b=>b.addEventListener('click',()=>{ state.measChartSite=b.dataset.measSite; render(); }));
   document.querySelectorAll('[data-meas-range]').forEach(b=>b.addEventListener('click',()=>{ state.measRange=b.dataset.measRange; render(); }));
-  el('meas-new',showMeasCheckInModal);
+  el('meas-new',()=>showMeasCheckInModal());
+  document.querySelectorAll('[data-edit-meas]').forEach(b=>b.addEventListener('click',()=>showMeasCheckInModal(b.dataset.editMeas)));
   el('meas-guide',showMeasGuideModal);
   el('bf-profile',showBodyProfileModal);
   document.querySelectorAll('[data-bfmethod]').forEach(b=>b.addEventListener('click',()=>{ state.bodyProfile={...state.bodyProfile,bfMethod:b.dataset.bfmethod}; schedulePlanSave(); render(); }));
