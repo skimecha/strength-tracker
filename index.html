@@ -406,7 +406,7 @@ async function deleteTicket(id){
   await loadSupportTickets(true); toast('Ticket deleted'); render();
 }
 
-const APP_VERSION = '2.45.0';
+const APP_VERSION = '2.45.1';
 const OWNER_UID     = '031a65ed-f52d-4a67-b271-47778e920c22';
 // Invite code from the URL (?invite=CODE) — drives the invite-only signup flow.
 let pendingInvite = new URLSearchParams(location.search).get('invite');
@@ -1219,12 +1219,14 @@ function showMachinePhotoModal(ex,machine){
   document.getElementById('modal-root').innerHTML=`<div class="modal-overlay" id="modal-overlay"><div class="modal" style="max-height:88vh;overflow-y:auto">
     <div class="modal-title">Machine ${machine} — ${esc(ex)}</div>${activeGyms().length>1?`<div style="font-size:12px;color:var(--text-muted);margin:-6px 0 10px">${esc(gymName(currentGymId()))}</div>`:''}
     <img src="${ph}" alt="Machine ${machine}" style="width:100%;border-radius:var(--radius-sm);border:1px solid var(--border);display:block;margin-bottom:12px">
-    <div class="btn-grid"><button class="btn btn-outline" id="mphoto-replace">📷 Replace</button><button class="btn btn-danger" id="mphoto-remove">Remove</button></div>
+    <div class="btn-grid"><button class="btn btn-outline" id="mphoto-retake">📷 Retake</button><button class="btn btn-outline" id="mphoto-replace">🖼 From library</button></div>
+    <button class="btn btn-danger btn-full" id="mphoto-remove" style="margin-top:10px">Remove photo</button>
     <button class="btn btn-outline btn-full" id="modal-cancel" style="margin-top:10px">Close</button>
   </div></div>`;
   document.getElementById('modal-cancel').addEventListener('click',closeModal);
   document.getElementById('modal-overlay').addEventListener('click',e=>{ if(e.target===e.currentTarget) closeModal(); });
   document.getElementById('mphoto-replace').addEventListener('click',()=>{ closeModal(); const f=document.getElementById('machine-photo-file'); if(f) f.click(); });
+  document.getElementById('mphoto-retake').addEventListener('click',()=>{ closeModal(); const f=document.getElementById('machine-photo-cam'); if(f) f.click(); });
   document.getElementById('mphoto-remove').addEventListener('click',()=>{ if(confirm(`Remove the Machine ${machine} photo for ${ex}?`)) removeMachinePhoto(ex,machine); });
 }
 
@@ -1242,9 +1244,11 @@ function renderSets(){
       ${(()=>{ const ph=machinePhotosFor(state.selectedExercise); const cur=ph[state.machine];
         return `<div style="display:flex;gap:8px;margin-top:10px;align-items:center">
           ${[1,2,3].filter(m=>ph[m]).map(m=>`<button data-mphoto-pick="${m}" aria-label="Select machine ${m}" style="position:relative;width:54px;height:54px;border-radius:8px;overflow:hidden;border:2px solid ${state.machine===m?'var(--accent)':'var(--border)'};padding:0;background:none;cursor:pointer;flex-shrink:0"><img src="${ph[m]}" alt="Machine ${m}" style="width:100%;height:100%;object-fit:cover;display:block"><span style="position:absolute;bottom:1px;right:4px;color:#fff;font-size:12px;font-weight:900;text-shadow:0 0 4px #000">${m}</span></button>`).join('')}
-          <button class="btn btn-outline btn-xs" id="machine-photo-btn" style="margin-left:auto;flex-shrink:0">📷 ${cur?`View M${state.machine}`:`Add photo · M${state.machine}`}</button>
+          ${cur?`<button class="btn btn-outline btn-xs" id="machine-photo-btn" style="margin-left:auto;flex-shrink:0">📷 View M${state.machine}</button>`
+            :`<span style="margin-left:auto;font-size:11px;color:var(--text-muted);font-weight:700;flex-shrink:0">M${state.machine} photo:</span><button class="btn btn-outline btn-xs" id="machine-photo-cam-btn" style="flex-shrink:0">📷 Camera</button><button class="btn btn-outline btn-xs" id="machine-photo-lib-btn" style="flex-shrink:0">🖼 Library</button>`}
         </div>
-        <input type="file" id="machine-photo-file" accept="image/*" style="display:none">`; })()}
+        <input type="file" id="machine-photo-file" accept="image/*" style="display:none">
+        <input type="file" id="machine-photo-cam" accept="image/*" capture="environment" style="display:none">`; })()}
     </div>
     <div class="card">
       <div class="card-title">${state.setType==='warmup'?'Warmup':'Working'} Set ${setNum}</div>
@@ -2623,8 +2627,12 @@ function attachEvents(){
     if(ph[state.machine]) showMachinePhotoModal(state.selectedExercise,state.machine);
     else{ const f=document.getElementById('machine-photo-file'); if(f) f.click(); }
   });
-  { const f=document.getElementById('machine-photo-file');
-    if(f) f.addEventListener('change',()=>{ const file=f.files&&f.files[0]; if(file) saveMachinePhoto(state.selectedExercise,state.machine,file); f.value=''; }); }
+  // capture="environment" asks the phone to open the rear camera directly;
+  // without it, newer Android photo pickers only offer the library.
+  el('machine-photo-cam-btn',()=>{ const f=document.getElementById('machine-photo-cam'); if(f) f.click(); });
+  el('machine-photo-lib-btn',()=>{ const f=document.getElementById('machine-photo-file'); if(f) f.click(); });
+  ['machine-photo-file','machine-photo-cam'].forEach(id=>{ const f=document.getElementById(id);
+    if(f) f.addEventListener('change',()=>{ const file=f.files&&f.files[0]; if(file) saveMachinePhoto(state.selectedExercise,state.machine,file); f.value=''; }); });
   document.querySelectorAll('[data-wunit]').forEach(b=>b.addEventListener('click',()=>{ state.weightUnit=b.dataset.wunit; localStorage.setItem('li_weight_unit',state.weightUnit); render(); }));
   document.querySelectorAll('[data-lunit]').forEach(b=>b.addEventListener('click',()=>{
     const u=b.dataset.lunit; if(u===state.liftUnit) return;
