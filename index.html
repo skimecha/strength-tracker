@@ -406,7 +406,7 @@ async function deleteTicket(id){
   await loadSupportTickets(true); toast('Ticket deleted'); render();
 }
 
-const APP_VERSION = '2.43.3';
+const APP_VERSION = '2.44.0';
 const OWNER_UID     = '031a65ed-f52d-4a67-b271-47778e920c22';
 // Invite code from the URL (?invite=CODE) — drives the invite-only signup flow.
 let pendingInvite = new URLSearchParams(location.search).get('invite');
@@ -584,6 +584,8 @@ async function loadUserData(){
     await loadDevNotes();  // separate so a missing dev_notes table never aborts the main load
     // Per-exercise settings (assisted flag). Isolated so a missing table never aborts the load.
     try{ const es=await sb.from('exercise_settings').select('exercise,assisted').eq('user_id',userId); if(!es.error&&Array.isArray(es.data)){ const m={}; es.data.forEach(r=>{ m[r.exercise]={assisted:!!r.assisted}; }); state.exerciseSettings=m; } }catch(e){ state.exerciseSettings={}; }
+    // PRs recorded before an exercise became assisted-by-default were ranked 'heavier is better'; re-rank them (writes only if the PR changes).
+    ASSISTED_DEFAULTS.forEach(n=>{ if(!state.exerciseSettings[n]) recomputePR(n); });
     // Meal Prep plan. Isolated so a missing meal_prep table never aborts the load.
     try{ const mp=await sb.from('meal_prep').select('data').eq('user_id',userId).maybeSingle(); const d=(mp.data&&mp.data.data)||{}; state.mealPrep={meals:Array.isArray(d.meals)?d.meals:[],overrides:(d.overrides&&typeof d.overrides==='object')?d.overrides:{}}; }catch(e){ state.mealPrep={meals:[],overrides:{}}; }
     // Body measurements. Isolated so a missing table never aborts the load.
@@ -859,7 +861,10 @@ function lbsToLift(lbs){ const n=+lbs; return state.liftUnit==='kg' ? +(n*0.4535
 function fmtLift(lbs){ return `${lbsToLift(lbs)} ${liftUnitLabel()}`; }                            // "100 lbs" / "45 kg"
 
 // ── Assisted exercises (lower weight = a better lift) ──
-function isAssisted(name){ const s=state.exerciseSettings[name]; return !!(s&&s.assisted); }
+// Standard exercises that are assisted for every user unless they explicitly
+// switch it off in Exercise Settings (an explicit row, true or false, wins).
+const ASSISTED_DEFAULTS=new Set(['Machine Assisted Pull-ups','Tricep Dips - Machine Assisted']);
+function isAssisted(name){ const s=state.exerciseSettings[name]; if(s) return !!s.assisted; return ASSISTED_DEFAULTS.has(name); }
 // Best working set, honoring assisted (reverse) ordering. Higher reps breaks ties.
 function bestSet(sets, assisted){
   return sets.reduce((a,b)=> assisted
@@ -885,8 +890,9 @@ function recomputePR(name){
     const b=bestSet(working,assisted);
     if(betterPR(b,best,assisted)) best={weight:b.weight,reps:b.reps,date:s.date};
   }));
-  if(best){ state.prs[name]=best; dbSavePR(name,best); }
-  else if(state.prs[name]){ delete state.prs[name]; dbDeletePR(name); }
+  const cur=state.prs[name];
+  if(best){ if(!cur||cur.weight!==best.weight||cur.reps!==best.reps){ state.prs[name]=best; dbSavePR(name,best); } }  // write only on change
+  else if(cur){ delete state.prs[name]; dbDeletePR(name); }
 }
 function setAssisted(name, assisted){
   state.exerciseSettings[name]={assisted:!!assisted};
