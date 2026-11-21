@@ -406,7 +406,7 @@ async function deleteTicket(id){
   await loadSupportTickets(true); toast('Ticket deleted'); render();
 }
 
-const APP_VERSION = '2.43.2';
+const APP_VERSION = '2.43.3';
 const OWNER_UID     = '031a65ed-f52d-4a67-b271-47778e920c22';
 // Invite code from the URL (?invite=CODE) — drives the invite-only signup flow.
 let pendingInvite = new URLSearchParams(location.search).get('invite');
@@ -430,7 +430,7 @@ const EXERCISES = {
   'Delts (Middle)':['Cable Lateral Raise - Hip Height','Cable Raise - Floor Height','Dumbell Raise - Standing Lateral','Machine Lateral Raise','Seated Lateral Raise - Dumbell','Upright Row - Barbell','Upright Row - Dumbell'],
   'Delts (Rear)':['Band Pull-Apart','Dumbell Raise - Seated (Decline)','Face Pulls','Rear Delt Machine Fly','Reverse Fly - Cable','Rotator Cuff - Cable','Rotator Cuff - Flat Bench'],
   'Biceps':['Curls - Barbell','Curls - Cable','Curls - Concentration','Curls - Dumbell (Decline)','Curls - Dumbell (Incline)','Curls - Dumbell (Standing)','Curls - EZ Bar (Standing)','Curls - Machine','Curls - Preacher (EZ Bar)','Curls - Preacher (Flat Bar)','Curls - Preacher (Machine)','Hammer Curls (Preacher)','Hammer Curls (Standing)','Reverse Curls - Barbell','Spider Curls'],
-  'Triceps':['Close-Grip Bench Press','Extension - Cable (One-Arm)','Kickbacks - Dumbell','Overhead Extension - Barbell','Overhead Extension - Cable (Two-Hand Bar)','Overhead Extension - Dumbell','Skull Crushers - Barbell','Skull Crushers - Dumbell','Tricep Dips','Tricep Pushdown - Cable (Rope)','Tricep Pushdown - Cable (Two-Hand Bar)'],
+  'Triceps':['Close-Grip Bench Press','Extension - Cable (One-Arm)','Kickbacks - Dumbell','Overhead Extension - Barbell','Overhead Extension - Cable (Two-Hand Bar)','Overhead Extension - Dumbell','Skull Crushers - Barbell','Skull Crushers - Dumbell','Tricep Dips','Tricep Dips - Machine Assisted','Tricep Pushdown - Cable (Rope)','Tricep Pushdown - Cable (Two-Hand Bar)'],
   'Forearms / Grip':['Curl - Dumbell','Dead Hang','Farmers Carry','Plate Pinch','Reverse Curl - Dumbell','Wrist Curl - Barbell','Wrist Curl - Dumbell'],
   'Abdominals':['Ab Wheel Rollout','Bicycle Crunch','Cable Crunch','Crunch','Decline Crunch','Hanging Leg Raise','Leg Raise - Lying','Oblique Crunch','Plank','Russian Twist','Side Plank','Sit-Up','Wood Chop - Cable'],
   'Quads':['Box Squat','Bulgarian Split Squats','Front Squat - Barbell','Hack Squat - Machine','Leg Extensions','Leg Press','Lunges','Pistol Squats','Sissy Squats','Squats','Step-Ups'],
@@ -452,7 +452,7 @@ const SHORT_NAMES = {
   'Reverse Fly - Dumbell':'Reverse Fly (DB)','Reverse Fly - Machine':'Machine Reverse Fly',
   'Cable Pulldown - Wide Grip':'Wide-Grip Pulldown','Diverging Lat Pulldown':'Diverging Pulldown',
   'Lat Pulldown - Close Grip':'Close-Grip Pulldown','Lat Pulldown - Underhand':'Underhand Pulldown',
-  'Machine Assisted Pull-ups':'Assisted Pull-ups','Straight Arm Pulldown - Cable':'Straight-Arm Pulldown',
+  'Machine Assisted Pull-ups':'Assisted Pull-ups','Tricep Dips - Machine Assisted':'Assisted Dips','Straight Arm Pulldown - Cable':'Straight-Arm Pulldown',
   'Dumbell Raise - Standing Front':'Shoulder Front Raise','Military Press - Barbell':'Military Press',
   'Overhead Press - Dumbbell (Seated)':'Seated Dumbell Press','Overhead Press - Machine':'Machine Shoulder Press',
   'Cable Lateral Raise - Hip Height':'Cable Lateral (Hip)','Cable Raise - Floor Height':'Cable Lateral (Floor)',
