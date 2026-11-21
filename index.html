@@ -406,7 +406,7 @@ async function deleteTicket(id){
   await loadSupportTickets(true); toast('Ticket deleted'); render();
 }
 
-const APP_VERSION = '2.44.0';
+const APP_VERSION = '2.45.0';
 const OWNER_UID     = '031a65ed-f52d-4a67-b271-47778e920c22';
 // Invite code from the URL (?invite=CODE) — drives the invite-only signup flow.
 let pendingInvite = new URLSearchParams(location.search).get('invite');
@@ -496,6 +496,7 @@ let state = {
   foodLog:[],mealFavorites:[],
   mealPrep:{meals:[],overrides:{}},mpStep:'week',mpWeekOff:0,mpDraft:null,
   machinePhotos:{},weeklySplit:{},adhOff:0,
+  gyms:[{id:'home',name:'Home gym'}],
   measurements:[],bodyView:'weight',bodyProfile:{},measUnit:localStorage.getItem('li_meas_unit')||'in',measChartSite:'waist',measRange:'3M',
   weightLog:[],
   weightUnit: localStorage.getItem('li_weight_unit') || 'lbs',
@@ -538,6 +539,7 @@ function resetAppState(){
   state.foodLog=[]; state.mealFavorites=[]; state.weightLog=[];
   state.mealPrep={meals:[],overrides:{}}; state.mpDraft=null; state.mpStep='week'; state.mpWeekOff=0;
   state.machinePhotos={}; Object.keys(_machinePhotoFetched).forEach(k=>delete _machinePhotoFetched[k]);
+  state.gyms=[{id:'home',name:'Home gym'}];
   state.measurements=[]; state.bodyView='weight'; state.bodyProfile={};
   state.macroGoals={calories:2500,protein:180,carbs:250,fat:80};
   state.logStep='type'; state._currentSession=null; state._resumedSnapshot=null; state.pendingSets=[]; state.view='log';
@@ -580,7 +582,7 @@ async function loadUserData(){
     state.favorites     = (ef.data|| []).map(r=>r.exercise);
     state.customExercises = ce.data || [];
     // Plan targets — loaded separately so a missing table never aborts the main data load.
-    try{ const pg=await sb.from('plan_targets').select('targets').eq('user_id',userId).maybeSingle(); const raw=(pg.data&&pg.data.targets)||{}; state.weeklySplit=(raw.split&&typeof raw.split==='object'&&!Array.isArray(raw.split))?raw.split:{}; delete raw.split; state.bodyProfile=(raw.profile&&typeof raw.profile==='object'&&!Array.isArray(raw.profile))?raw.profile:{}; delete raw.profile; state.planTargets=(raw.hypertrophy||raw.strength)?{hypertrophy:raw.hypertrophy||{},strength:raw.strength||{}}:{hypertrophy:raw,strength:{}}; }catch(e){ state.planTargets={hypertrophy:{},strength:{}}; state.weeklySplit={}; state.bodyProfile={}; }
+    try{ const pg=await sb.from('plan_targets').select('targets').eq('user_id',userId).maybeSingle(); const raw=(pg.data&&pg.data.targets)||{}; state.weeklySplit=(raw.split&&typeof raw.split==='object'&&!Array.isArray(raw.split))?raw.split:{}; delete raw.split; state.bodyProfile=(raw.profile&&typeof raw.profile==='object'&&!Array.isArray(raw.profile))?raw.profile:{}; delete raw.profile; state.gyms=normGyms(raw.gyms); delete raw.gyms; state.planTargets=(raw.hypertrophy||raw.strength)?{hypertrophy:raw.hypertrophy||{},strength:raw.strength||{}}:{hypertrophy:raw,strength:{}}; }catch(e){ state.planTargets={hypertrophy:{},strength:{}}; state.weeklySplit={}; state.bodyProfile={}; }
     await loadDevNotes();  // separate so a missing dev_notes table never aborts the main load
     // Per-exercise settings (assisted flag). Isolated so a missing table never aborts the load.
     try{ const es=await sb.from('exercise_settings').select('exercise,assisted').eq('user_id',userId); if(!es.error&&Array.isArray(es.data)){ const m={}; es.data.forEach(r=>{ m[r.exercise]={assisted:!!r.assisted}; }); state.exerciseSettings=m; } }catch(e){ state.exerciseSettings={}; }
@@ -729,6 +731,7 @@ async function handleLogout(){
 
 // ─── SUPABASE CRUD ────────────────────────────────────────────────────────────
 async function dbSaveSession(session){
+  if(session.gym) (session.exercises||[]).forEach(e=>{ if(e&&!e.gym) e.gym=session.gym; });
   const {error}=await sb.from('sessions').upsert({id:session.id,user_id:currentUser.id,date:session.date,exercises:session.exercises});
   if(error) toast('Save error — export CSV as backup','var(--red)');
 }
@@ -1066,6 +1069,7 @@ function renderWorkoutScreen(){
   return `
     <div style="display:flex;align-items:baseline;justify-content:space-between"><div style="display:flex;align-items:center;gap:10px">${isTrainer()?'<button class="btn btn-outline btn-sm" id="back-trainer-home">← Clients</button>':''}<div class="page-title">Log Workout</div></div>${versionStamp()}</div>
     <div class="subtitle">${fmtDate(Date.now())}</div>
+    <div style="display:flex;align-items:center;gap:10px"><label for="gym-select" style="margin:0;flex-shrink:0">Gym</label><select id="gym-select" class="select" style="flex:1">${activeGyms().map(g=>`<option value="${g.id}" ${g.id===currentGymId()?'selected':''}>${esc(g.name)}</option>`).join('')}<option value="__add">＋ Add gym…</option><option value="__manage">Manage gyms…</option></select></div>
     ${state.splitPicking?`<div style="background:var(--accent-dim);border:1px solid var(--accent);border-radius:var(--radius-sm);padding:10px 14px;font-size:13px;color:var(--accent);font-weight:700;display:flex;align-items:center;justify-content:space-between;gap:10px"><span>⑂ Super set — choose the next exercise.</span><button class="btn btn-outline btn-xs" id="split-cancel-pick" style="flex-shrink:0">Cancel</button></div>`
       :hasSets?`<div style="background:var(--accent-dim);border:1px solid var(--accent);border-radius:var(--radius-sm);padding:10px 14px;font-size:13px;color:var(--accent);font-weight:700">↩ Resuming ${fmtDate(state._currentSession.date)} — ${state._currentSession.exercises.length} exercise${state._currentSession.exercises.length!==1?'s':''} logged. Add more or finish.</div>`:''}
     ${(()=>{ const tt=todayTargets(); if(tt.length) return `<div style="background:var(--green-dim);border:1px solid var(--green);border-radius:var(--radius-sm);padding:8px 12px;font-size:12px;font-weight:700;color:var(--green)">● Today's focus: ${tt.map(esc).join(' · ')}</div>`; const nd=splitNextDay(); return nd!==null?`<div style="font-size:11px;color:var(--text-muted);text-align:center">Rest day on your split · next: ${MP_DAY_NAME[nd]} — ${(state.weeklySplit[nd]||[]).map(esc).join(' · ')}</div>`:''; })()}
@@ -1127,14 +1131,56 @@ function renderExerciseSelect(){
 // Loaded lazily per exercise, once per session (attempt-guarded: a missing
 // table or offline fetch must never re-render in a loop).
 const _machinePhotoFetched={};
-function machinePhotosFor(ex){ return (ex&&state.machinePhotos[ex])||{}; }
+// ── Gyms ─────────────────────────────────────────────────────────────────────
+// Gyms live in plan_targets.targets.gyms ([{id,name,deleted?}]); 'home' always
+// exists and is first. The selected gym is per device (li_gym). Workouts are
+// tagged with it, and each gym has its own Machine 1/2/3 photos. Records count
+// lifts from every gym (the Machine 1 rule still applies).
+function normGyms(g){ const arr=Array.isArray(g)?g.filter(x=>x&&x.id&&x.name):[]; if(!arr.some(x=>x.id==='home')) arr.unshift({id:'home',name:'Home gym'}); return arr; }
+function activeGyms(){ return state.gyms.filter(g=>!g.deleted); }
+function currentGymId(){ let id='home'; try{ id=localStorage.getItem('li_gym')||'home'; }catch(e){} return activeGyms().some(g=>g.id===id)?id:'home'; }
+function gymName(id){ const g=state.gyms.find(x=>x.id===(id||'home')); return g?g.name:'Home gym'; }
+function newSession(){ return {id:uid(),date:Date.now(),exercises:[],gym:currentGymId()}; }
+// The sessions table has no gym column, so the gym is persisted on each
+// exercise entry (like machine). A session's gym = its first tagged exercise;
+// workouts logged before gyms existed count as home.
+function gymOf(s){ return (s&&s.gym)||((s&&s.exercises||[]).find(e=>e&&e.gym)||{}).gym||'home'; }
+function setCurrentGym(id){
+  try{ localStorage.setItem('li_gym',id); }catch(e){}
+  // A brand-new (not resumed) workout in progress follows the switch.
+  if(state._currentSession&&!state._resumedSnapshot){ state._currentSession.gym=id; (state._currentSession.exercises||[]).forEach(e=>{ if(e) e.gym=id; }); }
+  render(); toast(`Gym: ${gymName(id)}`);
+}
+function addGymPrompt(){ const n=(prompt('Name this gym (e.g. "Work gym", "Hotel")')||'').trim().slice(0,40); if(!n){ render(); return; } const g={id:uid(),name:n}; state.gyms.push(g); schedulePlanSave(); setCurrentGym(g.id); }
+function showGymsModal(){
+  const rr=()=>{
+    document.getElementById('modal-root').innerHTML=`<div class="modal-overlay" id="modal-overlay"><div class="modal" style="max-height:88vh;overflow-y:auto">
+      <div class="modal-title">Gyms</div>
+      <div style="font-size:12px;color:var(--text-muted);line-height:1.5;margin-bottom:10px">Each gym has its own Machine 1/2/3 photos. Workouts are tagged with the gym, and records count lifts from every gym.</div>
+      <div class="section-gap">${activeGyms().map(g=>`<div style="display:flex;align-items:center;gap:8px"><div style="flex:1;font-size:14px;font-weight:700">${esc(g.name)}${g.id==='home'?' <span style="font-size:11px;color:var(--text-muted);font-weight:600">home</span>':''}${g.id===currentGymId()?' <span style="font-size:11px;color:var(--green);font-weight:800">· current</span>':''}</div><button class="btn btn-outline btn-xs" data-gym-ren="${g.id}">Rename</button>${g.id==='home'?'':`<button class="btn btn-danger btn-xs" data-gym-del="${g.id}">✕</button>`}</div>`).join('')}</div>
+      <div class="btn-grid" style="margin-top:14px"><button class="btn btn-outline" id="gym-add">＋ Add gym</button><button class="btn btn-primary" id="modal-cancel">Done</button></div>
+    </div></div>`;
+    document.getElementById('modal-cancel').addEventListener('click',()=>{ closeModal(); render(); });
+    document.getElementById('modal-overlay').addEventListener('click',e=>{ if(e.target===e.currentTarget){ closeModal(); render(); } });
+    document.getElementById('gym-add').addEventListener('click',()=>{ closeModal(); addGymPrompt(); });
+    document.querySelectorAll('[data-gym-ren]').forEach(b=>b.addEventListener('click',()=>{ const g=state.gyms.find(x=>x.id===b.dataset.gymRen); const n=(prompt('Gym name',g.name)||'').trim().slice(0,40); if(n){ g.name=n; schedulePlanSave(); } rr(); }));
+    // Deleting only hides the gym: past workouts keep their tag and name.
+    document.querySelectorAll('[data-gym-del]').forEach(b=>b.addEventListener('click',()=>{ const g=state.gyms.find(x=>x.id===b.dataset.gymDel); if(!confirm(`Remove "${g.name}" from your gym list? Past workouts keep their gym tag.`)) return; g.deleted=true; schedulePlanSave(); if(currentGymId()===g.id){ try{ localStorage.setItem('li_gym','home'); }catch(e){} } rr(); }));
+  };
+  rr();
+}
+// Photo storage key: home gym keeps the plain exercise name (existing photos
+// stay put); other gyms prefix it, so no schema change is needed.
+function photoKey(ex){ const g=currentGymId(); return g==='home'?ex:`${g}::${ex}`; }
+function machinePhotosFor(ex){ return (ex&&state.machinePhotos[photoKey(ex)])||{}; }
 function loadMachinePhotos(ex){
-  if(!ex||_machinePhotoFetched[ex]||!currentUser) return;
-  _machinePhotoFetched[ex]=true;
-  sb.from('machine_photos').select('machine,data').eq('user_id',currentUser.id).eq('exercise',ex).then(({data,error})=>{
+  const key=ex&&photoKey(ex);
+  if(!ex||_machinePhotoFetched[key]||!currentUser) return;
+  _machinePhotoFetched[key]=true;
+  sb.from('machine_photos').select('machine,data').eq('user_id',currentUser.id).eq('exercise',key).then(({data,error})=>{
     if(error||!Array.isArray(data)||!data.length) return;
     const m={}; data.forEach(r=>{ m[r.machine]=r.data; });
-    state.machinePhotos[ex]=m;
+    state.machinePhotos[key]=m;
     if(state.view==='log'&&state.logStep==='sets'&&state.selectedExercise===ex) render();
   },()=>{});
 }
@@ -1155,21 +1201,23 @@ async function saveMachinePhoto(ex,machine,file){
   try{
     toast('Processing photo…');
     const dataUrl=await downscalePhoto(file,640,0.72);
-    const {error}=await sb.from('machine_photos').upsert({user_id:currentUser.id,exercise:ex,machine,data:dataUrl,updated_at:new Date().toISOString()},{onConflict:'user_id,exercise,machine'});
+    const key=photoKey(ex);
+    const {error}=await sb.from('machine_photos').upsert({user_id:currentUser.id,exercise:key,machine,data:dataUrl,updated_at:new Date().toISOString()},{onConflict:'user_id,exercise,machine'});
     if(error){ toast('Photo save failed — run machine-photos-setup.sql','var(--red)'); return; }
-    (state.machinePhotos[ex]=state.machinePhotos[ex]||{})[machine]=dataUrl;
+    (state.machinePhotos[key]=state.machinePhotos[key]||{})[machine]=dataUrl;
     toast(`Machine ${machine} photo saved 📷`); render();
   }catch(e){ toast('Could not process that photo','var(--red)'); }
 }
 function removeMachinePhoto(ex,machine){
-  if(state.machinePhotos[ex]) delete state.machinePhotos[ex][machine];
-  sb.from('machine_photos').delete().eq('user_id',currentUser.id).eq('exercise',ex).eq('machine',machine).then(null,()=>{});
+  const key=photoKey(ex);
+  if(state.machinePhotos[key]) delete state.machinePhotos[key][machine];
+  sb.from('machine_photos').delete().eq('user_id',currentUser.id).eq('exercise',key).eq('machine',machine).then(null,()=>{});
   toast('Photo removed'); closeModal(); render();
 }
 function showMachinePhotoModal(ex,machine){
   const ph=machinePhotosFor(ex)[machine]; if(!ph) return;
   document.getElementById('modal-root').innerHTML=`<div class="modal-overlay" id="modal-overlay"><div class="modal" style="max-height:88vh;overflow-y:auto">
-    <div class="modal-title">Machine ${machine} — ${esc(ex)}</div>
+    <div class="modal-title">Machine ${machine} — ${esc(ex)}</div>${activeGyms().length>1?`<div style="font-size:12px;color:var(--text-muted);margin:-6px 0 10px">${esc(gymName(currentGymId()))}</div>`:''}
     <img src="${ph}" alt="Machine ${machine}" style="width:100%;border-radius:var(--radius-sm);border:1px solid var(--border);display:block;margin-bottom:12px">
     <div class="btn-grid"><button class="btn btn-outline" id="mphoto-replace">📷 Replace</button><button class="btn btn-danger" id="mphoto-remove">Remove</button></div>
     <button class="btn btn-outline btn-full" id="modal-cancel" style="margin-top:10px">Close</button>
@@ -1393,7 +1441,7 @@ function logCardioActivity(){
   const entry={type:'cardio',name:state.cardio.activity,duration:state.cardio.stopwatch.elapsed,distance:dist,distUnit:state.cardio.distUnit,heartRate:state.cardio.heartRate,t:Date.now()};
   // A typed-in duration may describe cardio done earlier, so its start time is unknown.
   if(state.cardio.manual) entry.manual=true;
-  if(!state._currentSession) state._currentSession={id:uid(),date:Date.now(),exercises:[]};
+  if(!state._currentSession) state._currentSession=newSession();
   state._currentSession.exercises.push(entry);
   swStop();
   state.cardio={activity:null,stopwatch:{running:false,elapsed:0,interval:null},distance:'',distUnit:'mi',heartRate:null,hrTestStep:'idle',hrTestCountdown:0,hrTestInterval:null,hrBeats:''};
@@ -1994,7 +2042,7 @@ function renderHistory(){
       ${sessions.length===0?'<div class="empty">No workouts logged yet.</div>':sessions.map(s=>`
         <div class="history-session">
           <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
-            <div class="history-date" style="margin-bottom:0">${fmtDate(s.date)}</div>
+            <div class="history-date" style="margin-bottom:0">${fmtDate(s.date)}${state.gyms.length>1?` <span style="font-size:11px;color:var(--text-muted);font-weight:700">· ${esc(gymName(gymOf(s)))}</span>`:''}</div>
             <div style="display:flex;gap:6px">
               <button class="btn btn-outline btn-xs resume-btn" data-resume="${s.id}" ${resuming?'disabled style="opacity:.4;cursor:not-allowed"':''}>↩ Resume</button>
               <button class="btn btn-danger btn-xs del-session-btn" data-del-session="${s.id}">✕</button>
@@ -2090,7 +2138,7 @@ function showSplitDayModal(dow){
 }
 
 function schedulePlanSave(){ clearTimeout(_planSaveTimer); _planSaveTimer=setTimeout(dbSavePlan,600); }
-async function dbSavePlan(){ const {error}=await sb.from('plan_targets').upsert({user_id:currentUser.id,targets:{...state.planTargets,split:state.weeklySplit,profile:state.bodyProfile},updated_at:new Date().toISOString()},{onConflict:'user_id'}); if(error) toast('Could not save plan','var(--red)'); }
+async function dbSavePlan(){ const {error}=await sb.from('plan_targets').upsert({user_id:currentUser.id,targets:{...state.planTargets,split:state.weeklySplit,profile:state.bodyProfile,gyms:state.gyms},updated_at:new Date().toISOString()},{onConflict:'user_id'}); if(error) toast('Could not save plan','var(--red)'); }
 function volumeColor(n, goal){ goal=goal||state.goal; if(goal==='strength') return n>12?'var(--red)':n>=10?'#f97316':n>=6?'#eab308':'var(--accent)'; return n>20?'var(--red)':n>=18?'#f97316':n>=12?'#eab308':'var(--accent)'; }
 // Segmented progress bar — the filled portion is colored by which volume band
 // each slice of sets falls into (blue 0–12, gold 12–18, orange 18–20, red 20+,
@@ -2568,6 +2616,7 @@ function attachEvents(){
   document.querySelectorAll('[data-effort]').forEach(b=>b.addEventListener('click',()=>{ state.effort=b.dataset.effort; render(); }));
   document.querySelectorAll('[data-loadmode]').forEach(b=>b.addEventListener('click',()=>{ state.loadMode=b.dataset.loadmode; render(); }));
   document.querySelectorAll('[data-machine]').forEach(b=>b.addEventListener('click',()=>{ state.machine=parseInt(b.dataset.machine); render(); }));
+  { const gs=document.getElementById('gym-select'); if(gs) gs.addEventListener('change',()=>{ const v=gs.value; if(v==='__add') addGymPrompt(); else if(v==='__manage'){ render(); showGymsModal(); } else setCurrentGym(v); }); }
   document.querySelectorAll('[data-mphoto-pick]').forEach(b=>b.addEventListener('click',()=>{ state.machine=parseInt(b.dataset.mphotoPick); render(); }));
   el('machine-photo-btn',()=>{
     const ph=machinePhotosFor(state.selectedExercise);
@@ -2835,7 +2884,7 @@ function commitExercise(){
     const entries=state.split.filter(e=>(e.sets||[]).length);
     state.split=null; state.splitIdx=0; state.splitPicking=false;
     if(!entries.length){ state.pendingSets=[]; return; }
-    if(!state._currentSession) state._currentSession={id:uid(),date:Date.now(),exercises:[]};
+    if(!state._currentSession) state._currentSession=newSession();
     entries.forEach(en=>{
       const working=en.sets.filter(s=>s.type==='working');
       // Records track the primary machine only — M2/M3 lifts never set PRs.
@@ -2855,7 +2904,7 @@ function commitExercise(){
     return;
   }
   if(!state.pendingSets.length) return;
-  if(!state._currentSession) state._currentSession={id:uid(),date:Date.now(),exercises:[]};
+  if(!state._currentSession) state._currentSession=newSession();
   const working=state.pendingSets.filter(s=>s.type==='working');
   // Records track the primary machine only — M2/M3 lifts never set PRs.
   if(working.length&&state.machine===1){
@@ -2899,7 +2948,7 @@ async function finishWorkout(doCommit){
 function resumeSession(sessionId){
   const s=state.sessions.find(s=>s.id===sessionId); if(!s) return;
   if(state._currentSession){ toast('Finish your current workout first','var(--red)'); return; }
-  state._currentSession={id:s.id,date:s.date,exercises:JSON.parse(JSON.stringify(s.exercises))};
+  state._currentSession={id:s.id,date:s.date,exercises:JSON.parse(JSON.stringify(s.exercises)),gym:gymOf(s)};
   state._resumedSnapshot=JSON.parse(JSON.stringify(s));  // saved copy, so an abandoned/cancelled resume never loses data
   state.sessions=state.sessions.filter(x=>x.id!==s.id);
   // Do NOT delete from the DB here. The original row stays until Finish & Save
@@ -2946,7 +2995,7 @@ function exportAllCSV(){ try{
     let wu=0,wk=0; ex.sets.forEach(set=>{ if(set.type==='warmup') wu++; else { wk++; working++; } rows.push([d,ex.muscle,ex.name,set.type,set.type==='warmup'?wu:wk,set.weight,set.reps,set.effort==='f'?'Failure':set.effort==='nf'?'Near Failure':'',set.uni?'Unilateral':'',(ex.machine||1)>1?'M'+ex.machine:'',fmtLocalTs(set.t),s.id]); });
     });
     const tm=sessionTiming(s);
-    summary.push([d,tm?fmtLocalTs(tm.start):'',tm?fmtLocalTs(tm.end):'',tm?tm.minutes:'',(s.exercises||[]).length,working,s.id]);
+    summary.push([d,tm?fmtLocalTs(tm.start):'',tm?fmtLocalTs(tm.end):'',tm?tm.minutes:'',(s.exercises||[]).length,working,gymName(gymOf(s)),s.id]);
   });
   if(cardio.length){
     rows.push(blank);
@@ -2957,7 +3006,7 @@ function exportAllCSV(){ try{
   if(summary.length){
     rows.push(blank);
     rows.push(['SESSIONS','','','','','','']);
-    rows.push(['Date','Start','End','Duration (min)','Exercises','Working Sets','Session ID']);
+    rows.push(['Date','Start','End','Duration (min)','Exercises','Working Sets','Gym','Session ID']);
     summary.forEach(r=>rows.push(r));
     rows.push(['Start/End come from per-set timestamps, recorded from v2.40.0 on; earlier sessions have none. Duration runs from the first logged set (or cardio start) to the last.','','','','','','']);
   }
